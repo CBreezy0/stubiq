@@ -1,0 +1,36 @@
+"""Static MLB team to division and league mapping used for collection planning."""
+
+from __future__ import annotations
+
+TEAM_METADATA = {
+    "Angels": {"division": "AL West", "league": "AL"},
+    "Astros": {"division": "AL West", "league": "AL"},
+    "Athletics": {"division": "AL West", "league": "AL"},
+    "Mariners": {"division": "AL West", "league": "AL"},
+    "Rangers": {"division": "AL West", "league": "AL"},
+    "White Sox": {"division": "AL Central", "league": "AL"},
+    "Guardians": {"division": "AL Central", "league": "AL"},
+    "Tigers": {"division": "AL Central", "league": "AL"},
+    "Royals": {"division": "AL Central", "league": "AL"},
+    "Twins": {"division": "AL Central", "league": "AL"},
+    "Orioles": {"division": "AL East", "league": "AL"},
+    "Red Sox": {"division": "AL East", "league": "AL"},
+    "Yankees": {"division": "AL East", "league": "AL"},
+    "Rays": {"division": "AL East", "league": "AL"},
+    "Blue Jays": {"division": "AL East", "league": "AL"},
+    "Braves": {"division": "NL East", "league": "NL"},
+    "Marlins": {"division": "NL East", "league": "NL"},
+    "Mets": {"division": "NL East", "league": "NL"},
+    "Nationals": {"division": "NL East", "league": "NL"},
+    "Phillies": {"division": "NL East", "league": "NL"},
+    "Cubs": {"division": "NL Central", "league": "NL"},
+    "Reds": {"division": "NL Central", "league": "NL"},
+    "Brewers": {"division": "NL Central", "league": "NL"},
+    "Pirates": {"division": "NL Central", "league": "NL"},
+    "Cardinals": {"division": "NL Central", "league": "NL"},
+    "Diamondbacks": {"division": "NL West", "league": "NL"},
+    "Rockies": {"division": "NL West", "league": "NL"},
+    "Dodgers": {"division": "NL West", "league": "NL"},
+    "Padres": {"division": "NL West", "league": "NL"},
+    "Giants": {"division": "NL West", "league": "NL"},
+}

@@ -1,0 +1,35 @@
+# OS / editor
+.DS_Store
+*.log
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+frontend/.env.local
+backend/.env
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Node / frontend
+node_modules/
+frontend/.next/
+.next/
+
+# Build output
+build/
+dist/
+out/
+coverage/
+
+# iOS / Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
