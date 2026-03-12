@@ -7,6 +7,7 @@ from typing import Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from sqlalchemy import inspect
 from sqlalchemy.engine import make_url
 
 from app.api.routes.auth import router as auth_router
@@ -23,8 +24,10 @@ from app.api.routes.portfolio import router as portfolio_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.users import router as users_router
 from app.config import Settings, get_settings
-from app.database import create_db_engine, create_session_factory, init_schema
+from app.database import configure_database, create_session_factory, init_schema
 from app.jobs import SchedulerManager
+from app.services.db_health import check_database
+from app.services.db_seed import seed_if_empty
 from app.security.rate_limit import RateLimiter
 from app.services import (
     AppleTokenVerifierService,
@@ -41,7 +44,6 @@ from app.services import (
     MLBStatsAdapter,
     TokenService,
     UserService,
-    seed_dev_data,
 )
 
 
@@ -61,7 +63,7 @@ def _safe_database_url(database_url: str) -> str:
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
     settings = settings or get_settings()
     logger.info("Connecting to PostgreSQL database: %s", _safe_database_url(settings.database_url))
-    engine = create_db_engine(settings.database_url, echo=settings.debug)
+    engine = configure_database(settings.database_url, echo=settings.debug)
     session_factory = create_session_factory(engine)
     show_adapter = ShowApiAdapter(settings.show_api_base_url, timeout_seconds=settings.request_timeout_seconds)
     mlb_adapter = MLBStatsAdapter(settings.mlb_stats_api_base_url, timeout_seconds=settings.request_timeout_seconds)
@@ -86,12 +88,22 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        check_database(engine)
+        if "neon.tech" in settings.database_url:
+            logger.info("Connected to Neon PostgreSQL successfully.")
+        else:
+            logger.info("Connected to database successfully.")
+
         if settings.auto_create_schema:
             init_schema(engine)
+
+        table_count = len(inspect(engine).get_table_names())
+        logger.info("Detected %d tables in database.", table_count)
+
         if settings.auto_seed_dev_data:
             with session_factory() as session:
-                seed_dev_data(session)
-                session.commit()
+                if seed_if_empty(session):
+                    session.commit()
         if settings.scheduler_enabled and not settings.testing:
             scheduler_manager.start()
         try:

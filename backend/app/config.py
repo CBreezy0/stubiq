@@ -5,12 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from functools import lru_cache
+from pathlib import Path
 import getpass
 import json
 import os
 from typing import Any, Dict, Optional, Tuple
 
+from dotenv import load_dotenv
+
 from .utils.enums import MarketPhase
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
 DEFAULT_STRATEGY_WEIGHTS: Dict[str, float] = {
