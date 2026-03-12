@@ -1,188 +1,188 @@
-# MLB Show Dashboard
+# StubIQ
 
-An open-source MLB The Show market intelligence platform with a FastAPI backend, a Next.js web dashboard, and a SwiftUI iOS client.
+> Real-time Diamond Dynasty market intelligence for MLB The Show.
 
-The project combines market ingestion, flips and floor-buy scanning, roster-update analysis, portfolio tracking, collection strategy, user-scoped settings, JWT auth, Google sign-in, Apple sign-in, and console connection scaffolding for Xbox and PlayStation.
+StubIQ is a full-stack MLB The Show Diamond Dynasty market analytics platform built to monitor the in-game marketplace, surface profitable trading opportunities, and deliver modern decision support across web and iOS.
+
+It combines real-time marketplace ingestion, liquidity analysis, flip detection, roster-upgrade investing signals, portfolio tracking, and user-friendly dashboards into a production-style tool for serious Diamond Dynasty traders.
+
+## Overview
+
+StubIQ tracks the MLB The Show marketplace, detects profitable flips, analyzes liquidity, predicts roster upgrade investments, and provides modern dashboards across web and iOS.
+
+The platform is designed for players who want:
+- faster visibility into market movement
+- cleaner signals for buy/sell decisions
+- better confidence around upgrade-driven investments
+- one place to monitor flips, collections, and portfolio performance
 
 ## Screenshots
-| Web Dashboard | iOS Dashboard | Portfolio |
+
+| Dashboard | Flips | Portfolio |
 | --- | --- | --- |
-| _Add screenshot in `docs/images/web-dashboard.png`_ | _Add screenshot in `docs/images/ios-dashboard.png`_ | _Add screenshot in `docs/images/portfolio.png`_ |
+| ![Dashboard Placeholder](docs/images/dashboard.png) | ![Flips Placeholder](docs/images/flips.png) | ![Portfolio Placeholder](docs/images/portfolio.png) |
 
-## Repository Layout
-- `backend/` — FastAPI, SQLAlchemy, Alembic, PostgreSQL integrations, tests
-- `frontend/` — Next.js dashboard for desktop and browser workflows
-- `ios/` — SwiftUI iOS application and Xcode project generator
-- `docs/` — architecture notes, diagrams, and supporting documentation
-- `scripts/` — setup, validation, and repository safety helpers
+## Features
 
-## Architecture Overview
-High-level flow:
-- `frontend/` and `ios/` both talk to the FastAPI API in `backend/`
-- `backend/` manages auth, portfolio ownership, settings, analytics, and console connection state
-- PostgreSQL stores users, refresh tokens, settings, connections, portfolio positions, and analytics tables
-- External integrations include Google auth, Apple identity token verification, MLB The Show market data, MLB stats data, and future Xbox/PlayStation OAuth providers
+- Real-time marketplace ingestion
+- Flip opportunity detection
+- Liquidity ranking engine
+- Roster upgrade investment predictions
+- Portfolio tracking
+- Web analytics dashboard
+- Native iOS app
+- Authentication with Google / Apple
+- Console account connection architecture
 
-A Mermaid architecture diagram lives in `docs/architecture.md:1`.
+## Architecture
 
-## Prerequisites
-- Python `3.11+` recommended for the backend
-- Node.js `18+` for the frontend
-- Xcode `16+` and iOS Simulator for the iOS app
-- PostgreSQL `14+` for local backend persistence
-- Ruby with the `xcodeproj` gem for regenerating the iOS project
+StubIQ follows a simple full-stack analytics pipeline:
 
-## Setup Instructions
-### 1. Bootstrap dependencies
-You can use the helper script:
-
-```bash
-./scripts/bootstrap.sh
+```text
+MLB Show API
+      ↓
+FastAPI ingestion engine
+      ↓
+PostgreSQL market database
+      ↓
+Analytics engine
+      ↓
+Web dashboard (Next.js)
+iOS app (SwiftUI)
 ```
 
-Or install manually using the service-specific sections below.
+At a high level:
+- the backend ingests and normalizes market data
+- PostgreSQL stores user, market, portfolio, and recommendation state
+- analytics services generate liquidity, flip, and roster-upgrade signals
+- the web app and iOS app consume the same backend APIs
 
-### 2. Configure environment variables
-Never commit real secrets. Copy values from example files only:
+For a diagrammed version, see `docs/architecture.md:1`.
 
-- Root reference: `.env.example`
-- Backend source of truth: `backend/.env.example`
-- Frontend source of truth: `frontend/.env.example`
+## Tech Stack
 
-Typical local copies:
+**Backend**
+- FastAPI
+- PostgreSQL
+- SQLAlchemy
+- APScheduler
+
+**Frontend**
+- Next.js
+- TypeScript
+- React
+- Recharts
+
+**Mobile**
+- SwiftUI
+- iOS networking with async/await
+
+**Infrastructure**
+- GitHub
+- Docker support
+
+## Repository Structure
+
+```text
+backend/
+frontend/
+ios/
+docs/
+scripts/
+```
+
+## Getting Started
+
+```bash
+git clone https://github.com/CBreezy0/stubiq.git
+cd stubiq
+```
+
+### Backend
+
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### iOS
+
+```bash
+ruby ios/MLBShowDashboard/scripts/generate_project.rb
+```
+
+Then open `ios/MLBShowDashboard/MLBShowDashboard.xcodeproj` in Xcode and run the app on a simulator.
+
+## Configuration
+
+Environment variables should come from example files, not committed secrets.
+
+Use:
+- `.env.example`
+- `backend/.env.example`
+- `frontend/.env.example`
+
+Typical local setup:
 
 ```bash
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env.local
 ```
 
-## Backend Setup
-```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-alembic upgrade head
-uvicorn app.main:app --reload
-```
-
-Backend API defaults to `http://127.0.0.1:8000`.
-
-### Backend Notes
-- Tests: `venv/bin/pytest app/tests -q`
-- Main app entrypoint: `backend/app/main.py`
-- Seed helper: `backend/scripts/seed_dev.py`
-- Auth and connection routes live under `backend/app/api/routes/`
-
-## Frontend Setup
-```bash
-cd frontend
-cp .env.example .env.local
-npm install
-npm run dev
-```
-
-Frontend defaults to `http://localhost:3000` and reads the API base URL from `NEXT_PUBLIC_API_BASE_URL`.
-
-### Frontend Notes
-- Production build: `npm run build`
-- Start production server: `npm run start`
-- Main dashboard route: `http://localhost:3000/dashboard`
-
-## iOS Setup
-Generate the Xcode project first:
-
-```bash
-ruby ios/MLBShowDashboard/scripts/generate_project.rb
-```
-
-Then:
-- Open `ios/MLBShowDashboard/MLBShowDashboard.xcodeproj`
-- Select an iPhone simulator
-- Build and run from Xcode
-
-### iOS Notes
-- The app supports backend JWT auth plus Google and Apple sign-in flows
-- Google sign-in requires the Firebase/GoogleSignIn packages and `GoogleService-Info.plist`
-- Apple sign-in requires the Xcode capability and a matching backend `APPLE_CLIENT_ID`
-- Console linking works in placeholder/mock mode until official provider credentials are available
-
-See `ios/MLBShowDashboard/README.md:1` for mobile-specific setup details.
-
-## Environment Variables
-Use example files as the source of truth.
-
-### Backend
-Configured in `backend/.env.example` and typically copied to `backend/.env`.
-
-Important values:
+Key backend variables include:
 - `DATABASE_URL`
 - `JWT_SECRET_KEY`
 - `JWT_REFRESH_SECRET_KEY`
-- `ACCESS_TOKEN_EXPIRE_MINUTES`
-- `REFRESH_TOKEN_EXPIRE_DAYS`
 - `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
 - `APPLE_CLIENT_ID`
-- `XBOX_CLIENT_ID`
-- `XBOX_CLIENT_SECRET`
-- `PLAYSTATION_CLIENT_ID`
-- `PLAYSTATION_CLIENT_SECRET`
 - `ENABLE_MOCK_CONSOLE_CONNECTIONS`
-- `AUTH_RATE_LIMIT_MAX_REQUESTS`
-- `AUTH_RATE_LIMIT_WINDOW_SECONDS`
 
-### Frontend
-Configured in `frontend/.env.example` and typically copied to `frontend/.env.local`.
-
-Important values:
+Key frontend variable:
 - `NEXT_PUBLIC_API_BASE_URL`
 
-### iOS
-The iOS app does not rely on a checked-in `.env` file. Backend targets are configured in-app, and provider setup is documented in `ios/MLBShowDashboard/README.md:1`.
-
 ## Launch Instructions
-### Full web stack
-If your backend virtualenv and frontend dependencies are already installed:
+
+### Run the web stack
 
 ```bash
 ./start.sh
 ```
 
-That starts:
-- FastAPI at `http://127.0.0.1:8000`
-- Next.js at `http://localhost:3000/dashboard`
+This starts:
+- FastAPI on `http://127.0.0.1:8000`
+- Next.js on `http://localhost:3000/dashboard`
 
-### Service-by-service
-Backend:
-
-```bash
-cd backend
-source venv/bin/activate
-uvicorn app.main:app --reload
-```
-
-Frontend:
-
-```bash
-cd frontend
-npm run dev
-```
-
-iOS:
-- Run the app from Xcode after generating the project
-
-## Validation
-Use the repo validation helper before pushing:
+### Validate the repository
 
 ```bash
 ./scripts/check-secrets.sh
 ./scripts/validate.sh
 ```
 
-## License
-MIT — see `LICENSE:1`.
+## Development Notes
 
-## Contributing
-See `CONTRIBUTING.md:1` for workflow, testing, and pull request guidance.
+MLB The Show API behavior can vary around a new game launch. If current-season endpoints are not yet fully available, MLB25 endpoints may be used for testing until the new live marketplace is stable.
+
+That makes StubIQ easier to iterate on before full release-day data is available.
+
+## Roadmap
+
+- Real console OAuth integration
+- Public hosted dashboard
+- iOS App Store release
+- Advanced trading signals
+
+## License
+
+MIT License — see `LICENSE:1`.
