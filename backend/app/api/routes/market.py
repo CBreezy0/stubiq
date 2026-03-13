@@ -15,6 +15,7 @@ from app.schemas.cards import CardSummaryResponse
 from app.schemas.market import MarketOpportunityListResponse, MarketOpportunityResponse
 from app.schemas.show_sync import LiveMarketListingListResponse, MarketMoverItem, MarketMoverListResponse, MarketMoversResponse, PriceHistoryResponse
 from app.security.deps import get_optional_user
+from app.services.redis_cache import build_cache_key, load_cached_response, store_cached_response
 from app.utils.enums import MarketPhase, RecommendationAction
 
 router = APIRouter(prefix="/market", tags=["market"])
@@ -182,6 +183,11 @@ def market_movers(
     limit: int = Query(default=50, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
+    cache_key = build_cache_key("market/movers", {"limit": limit})
+    cached_response = load_cached_response(cache_key, MarketMoversResponse)
+    if cached_response is not None:
+        return cached_response
+
     rows = db.scalars(
         select(MarketMoverCache)
         .where(MarketMoverCache.change_percent.is_not(None))
@@ -202,7 +208,9 @@ def market_movers(
         )
         for row in rows
     ]
-    return MarketMoversResponse(count=len(items), items=items)
+    response = MarketMoversResponse(count=len(items), items=items)
+    store_cached_response(cache_key, response)
+    return response
 
 
 @router.get("/trending", response_model=MarketMoverListResponse)
@@ -238,6 +246,11 @@ def market_floors(
     limit: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
+    cache_key = build_cache_key("market/floors", {"limit": limit})
+    cached_response = load_cached_response(cache_key, MarketOpportunityListResponse)
+    if cached_response is not None:
+        return cached_response
+
     latest_snapshots = _latest_snapshot_subquery()
     phase = _cached_market_phase(db)
     rows = db.execute(
@@ -249,7 +262,9 @@ def market_floors(
         .limit(limit)
     ).all()
     items = [_cached_floor_response(row, card, snapshot_row, phase) for row, card, snapshot_row in rows]
-    return MarketOpportunityListResponse(phase=phase, count=len(items), items=items)
+    response = MarketOpportunityListResponse(phase=phase, count=len(items), items=items)
+    store_cached_response(cache_key, response)
+    return response
 
 
 @router.get("/phases")

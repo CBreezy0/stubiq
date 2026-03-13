@@ -12,6 +12,7 @@ from app.api.deps import get_show_sync_service
 from app.api.routes.market import listing_query_params
 from app.database import get_db
 from app.models import Card, TopFlip
+from app.services.redis_cache import build_cache_key, load_cached_response, store_cached_response
 from app.schemas.show_sync import LiveMarketListingListResponse, LiveMarketListingResponse
 
 router = APIRouter(prefix="/flips", tags=["flips"])
@@ -74,6 +75,11 @@ def top_flips(
     params=Depends(top_flip_query_params),
     db: Session = Depends(get_db),
 ):
+    cache_key = build_cache_key("flips/top", params)
+    cached_response = load_cached_response(cache_key, LiveMarketListingListResponse)
+    if cached_response is not None:
+        return cached_response
+
     sort_column = _top_flip_sort_column(params["sort_by"])
     query = (
         select(TopFlip, Card)
@@ -105,7 +111,9 @@ def top_flips(
         query.order_by(sort_column.desc().nullslast(), TopFlip.updated_at.desc()).limit(params["limit"])
     ).all()
     items = [_top_flip_row_to_response(top_flip, card) for top_flip, card in rows]
-    return LiveMarketListingListResponse(count=len(items), items=items)
+    response = LiveMarketListingListResponse(count=len(items), items=items)
+    store_cached_response(cache_key, response)
+    return response
 
 
 @router.get("", response_model=LiveMarketListingListResponse)
