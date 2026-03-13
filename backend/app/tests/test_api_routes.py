@@ -26,6 +26,21 @@ def test_health_route(client):
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["game_year"] == 26
+    assert "database_url" not in payload
+
+
+
+def test_healthz_route(client):
+    response = client.get("/healthz")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+
+def test_readyz_route(client):
+    response = client.get("/readyz")
+    assert response.status_code == 200
+    assert response.json() == {"database": "connected"}
 
 
 

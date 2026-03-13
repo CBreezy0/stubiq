@@ -29,12 +29,19 @@ class MarketPhaseResponse(BaseModel):
     detected_at: datetime
 
 
+class HealthzResponse(BaseModel):
+    status: str
+
+
+class ReadinessResponse(BaseModel):
+    database: str
+
+
 class HealthResponse(BaseModel):
     status: str
     app_name: str
     game_year: int
     scheduler_running: bool
-    database_url: str
     market_phase: MarketPhaseResponse
     feature_flags: Dict[str, bool]
 
