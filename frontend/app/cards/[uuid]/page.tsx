@@ -9,16 +9,58 @@ import { EmptyState } from '@/components/EmptyState';
 import { LoadingState } from '@/components/LoadingState';
 import { PriceHistoryChart } from '@/components/PriceHistoryChart';
 import { RequireAuth } from '@/components/RequireAuth';
-import { api } from '@/lib/api';
+import { ACCESS_TOKEN_STORAGE_KEY, API_BASE_URL, api } from '@/lib/api';
 import { formatPercent, formatRelativeDate, formatStubs } from '@/lib/utils';
 
+type CardPriceHistoryPoint = {
+  timestamp: string;
+  best_buy_price?: number | null;
+  best_sell_price?: number | null;
+  volume?: number | null;
+};
+
+type CardPriceHistoryResponse = {
+  item_id: string;
+  name?: string | null;
+  points: CardPriceHistoryPoint[];
+};
+
+async function fetchCardPriceHistory(itemId: string): Promise<CardPriceHistoryResponse> {
+  const headers = new Headers({ Accept: 'application/json' });
+  const accessToken = typeof window === 'undefined' ? null : window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/cards/${encodeURIComponent(itemId)}/history`, {
+    headers,
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    let message = `Request failed with status ${response.status}`;
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (payload.detail) message = payload.detail;
+    } catch {
+      const raw = await response.text();
+      if (raw) message = raw;
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<CardPriceHistoryResponse>;
+}
+
 async function fetchCardContext(itemId: string) {
-  const [card, history7, history1] = await Promise.all([
+  const [card, cardHistory, history7, history1] = await Promise.all([
     api.getCardDetail(itemId),
+    fetchCardPriceHistory(itemId),
     api.getMarketHistory(itemId, 7),
     api.getMarketHistory(itemId, 1),
   ]);
-  return { card, history7, history1 };
+  return { card, cardHistory, history7, history1 };
 }
 
 function CardDetailContent() {
@@ -30,12 +72,22 @@ function CardDetailContent() {
 
   const activeHistory = range === 1 ? data?.history1 : data?.history7;
   const card = data?.card ?? null;
+  const latestCardHistoryPoint = data?.cardHistory.points.at(-1) ?? null;
   const latestPoint = activeHistory?.points.at(-1) ?? data?.history7.points.at(-1) ?? null;
-  const latestSellPrice = card?.latest_best_sell_order ?? latestPoint?.sell_price ?? card?.latest_sell_now ?? null;
-  const latestBuyPrice = card?.latest_best_buy_order ?? latestPoint?.buy_price ?? card?.latest_buy_now ?? null;
+  const latestSellPrice = card?.latest_best_sell_order ?? latestCardHistoryPoint?.best_sell_price ?? latestPoint?.sell_price ?? card?.latest_sell_now ?? null;
+  const latestBuyPrice = card?.latest_best_buy_order ?? latestCardHistoryPoint?.best_buy_price ?? latestPoint?.buy_price ?? card?.latest_buy_now ?? null;
   const estimatedProfit = latestBuyPrice != null && latestSellPrice != null ? Math.round(latestSellPrice * 0.9 - latestBuyPrice) : card?.latest_tax_adjusted_spread ?? null;
   const estimatedRoi = latestBuyPrice != null && latestBuyPrice > 0 && latestSellPrice != null ? ((latestSellPrice * 0.9 - latestBuyPrice) / latestBuyPrice) * 100 : null;
-  const title = card?.name ?? data?.history7.name ?? itemId;
+  const title = card?.name ?? data?.cardHistory.name ?? data?.history7.name ?? itemId;
+  const priceHistoryPoints = useMemo(
+    () =>
+      (data?.cardHistory.points ?? []).map((point) => ({
+        timestamp: point.timestamp,
+        buy_price: point.best_buy_price ?? null,
+        sell_price: point.best_sell_price ?? null,
+      })),
+    [data?.cardHistory.points],
+  );
 
   const metadata = useMemo(
     () => [
@@ -70,7 +122,7 @@ function CardDetailContent() {
             <p className="mt-3 max-w-3xl text-sm text-slate-400">Live market pricing, recent history, and after-tax ROI context for the selected card.</p>
           </div>
           <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-300">
-            Last seen <span className="font-semibold text-white">{formatRelativeDate(card?.observed_at ?? activeHistory?.points.at(-1)?.timestamp)}</span>
+            Last seen <span className="font-semibold text-white">{formatRelativeDate(card?.observed_at ?? latestCardHistoryPoint?.timestamp ?? activeHistory?.points.at(-1)?.timestamp)}</span>
           </div>
         </div>
 
@@ -131,10 +183,10 @@ function CardDetailContent() {
             ))}
           </div>
 
-          {activeHistory && activeHistory.points.length > 0 ? (
+          {priceHistoryPoints.length > 0 || (activeHistory && activeHistory.points.length > 0) ? (
             <>
-              <PriceHistoryChart title={`Price history (${range === 1 ? '24h' : '7d'})`} points={activeHistory.points} metric="price" />
-              <PriceHistoryChart title="ROI trend" points={activeHistory.points} metric="roi" />
+              {priceHistoryPoints.length > 0 ? <PriceHistoryChart title="Card sell price history" points={priceHistoryPoints} metric="price" /> : null}
+              {activeHistory && activeHistory.points.length > 0 ? <PriceHistoryChart title="ROI trend" points={activeHistory.points} metric="roi" /> : null}
             </>
           ) : (
             <EmptyState title="No history yet" description="Price history will populate after enough listing snapshots or price-history sync rows exist." />
