@@ -74,7 +74,7 @@ class MarketHistoryAggregate(TimestampMixin, Base):
     avg_price_6h: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     avg_price_24h: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     volatility_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    liquidity_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    liquidity_score: Mapped[Optional[float]] = mapped_column(Float, index=True, nullable=True)
 
     card: Mapped[Card] = relationship(back_populates="market_aggregates")
 
