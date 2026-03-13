@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.database import Base
 from .auth import AuthAuditLog, RefreshToken
+from .analytics_cache import FloorOpportunity, MarketMoverCache, MarketPhaseCache, TopFlip
 from .connection import UserConnection
 from .domain import (
     Card,
@@ -36,6 +37,10 @@ def load_all_models():
         AuthAuditLog,
         UserConnection,
         Card,
+        TopFlip,
+        MarketMoverCache,
+        FloorOpportunity,
+        MarketPhaseCache,
         MarketListing,
         PriceHistory,
         UserInventory,
@@ -67,6 +72,10 @@ __all__ = [
     "AuthAuditLog",
     "UserConnection",
     "Card",
+    "TopFlip",
+    "MarketMoverCache",
+    "FloorOpportunity",
+    "MarketPhaseCache",
     "MarketListing",
     "PriceHistory",
     "UserInventory",
