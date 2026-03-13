@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.models import (
     Card,
+    MarketPhaseCache,
     MarketPhaseHistory,
     PlayerStatsDaily,
     PlayerStatsRolling,
@@ -46,8 +47,6 @@ from app.strategies import (
     GrindModeInput,
     MarketEngine,
     MarketInput,
-    MarketPhaseEngine,
-    PhaseObservation,
     PortfolioEngine,
     PortfolioInput,
     RosterUpdateEngine,
@@ -79,7 +78,6 @@ class RecommendationService:
         self.market_data_service = market_data_service
         self.portfolio_service = portfolio_service
         self.user_service = user_service
-        self.phase_engine = MarketPhaseEngine(settings)
         self.roster_update_engine = RosterUpdateEngine(settings.quicksell_tiers)
 
     def _engine_thresholds(self, session: Session, user: Optional[User] = None) -> Dict[str, float]:
@@ -147,46 +145,35 @@ class RecommendationService:
 
     def get_phase(self, session: Session, user: Optional[User] = None) -> MarketPhaseResponse:
         override = self.config_store.get_market_phase_override(session) or self.settings.market_phase_override
-        metrics = self.market_data_service.build_market_observation(session)
-        now = utcnow()
-        next_update_at = session.scalar(
-            select(RosterUpdateCalendar.update_date)
-            .where(RosterUpdateCalendar.update_type == UpdateType.ATTRIBUTE_UPDATE)
-            .where(RosterUpdateCalendar.update_date >= now)
-            .order_by(RosterUpdateCalendar.update_date.asc())
-            .limit(1)
-        )
-        last_update_at = session.scalar(
-            select(RosterUpdateCalendar.update_date)
-            .where(RosterUpdateCalendar.update_type == UpdateType.ATTRIBUTE_UPDATE)
-            .where(RosterUpdateCalendar.update_date < now)
-            .order_by(RosterUpdateCalendar.update_date.desc())
-            .limit(1)
-        )
-        content_drop_flag = session.scalar(
-            select(RosterUpdateCalendar.id)
-            .where(RosterUpdateCalendar.update_type == UpdateType.CONTENT_DROP)
-            .where(RosterUpdateCalendar.update_date >= now - timedelta(hours=24))
-            .limit(1)
-        ) is not None
-        self.phase_engine.thresholds = self._engine_thresholds(session, user)
-        decision = self.phase_engine.detect_phase(
-            PhaseObservation(
-                as_of=now,
-                recent_market_drop_pct=metrics.get("recent_market_drop_pct", 0.0),
-                recent_supply_growth_pct=metrics.get("recent_supply_growth_pct", 0.0),
-                content_drop_flag=content_drop_flag,
-                current_override=override,
-                next_update_at=next_update_at,
-                last_update_at=last_update_at,
+        if override is not None:
+            return MarketPhaseResponse(
+                phase=override,
+                confidence=100.0,
+                rationale="Manual market phase override is active.",
+                override_active=True,
+                detected_at=utcnow(),
             )
+
+        cached_phase = session.scalar(
+            select(MarketPhaseCache).order_by(MarketPhaseCache.updated_at.desc(), MarketPhaseCache.id.desc()).limit(1)
         )
+        if cached_phase is not None:
+            return MarketPhaseResponse(
+                phase=cached_phase.phase,
+                confidence=float(cached_phase.confidence or 0.0),
+                rationale="Cached market phase from background worker.",
+                override_active=False,
+                detected_at=cached_phase.updated_at,
+            )
+
+        fallback_phase = MarketPhase.STABILIZATION
+        logger.warning("Market phase cache is empty; falling back to %s", fallback_phase.value)
         return MarketPhaseResponse(
-            phase=decision.phase,
-            confidence=decision.confidence,
-            rationale=decision.rationale,
-            override_active=decision.override_active,
-            detected_at=decision.detected_at,
+            phase=fallback_phase,
+            confidence=0.0,
+            rationale="No cached market phase available; using stabilization fallback.",
+            override_active=False,
+            detected_at=utcnow(),
         )
 
     def get_phase_history(self, session: Session) -> List[dict]:
