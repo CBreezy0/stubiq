@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,7 @@ MARKET_LISTINGS_HARD_CAP = 50
 MARKET_MOVERS_HARD_CAP = 25
 MARKET_FLOORS_HARD_CAP = 25
 MARKET_TRENDING_HARD_CAP = 25
+CACHE_CONTROL_HEADER = "public, max-age=60"
 
 
 def _latest_snapshot_subquery():
@@ -61,6 +62,15 @@ def _latest_snapshot_subquery():
 def _cached_market_phase(db: Session) -> MarketPhase:
     phase = db.scalar(select(MarketPhaseCache.phase).order_by(MarketPhaseCache.updated_at.desc()).limit(1))
     return phase or MarketPhase.STABILIZATION
+
+
+def _merge_cache_control(response: Response) -> None:
+    existing = response.headers.get("Cache-Control")
+    if not existing:
+        response.headers["Cache-Control"] = CACHE_CONTROL_HEADER
+        return
+    if CACHE_CONTROL_HEADER not in existing:
+        response.headers["Cache-Control"] = f"{existing}, {CACHE_CONTROL_HEADER}"
 
 
 def _cached_floor_action(row: FloorOpportunity) -> RecommendationAction:
@@ -186,8 +196,10 @@ def market_history(
 
 @router.get("/movers", response_model=MarketMoversResponse)
 def market_movers(
+    response: Response,
     limit: int = Query(default=50, ge=1, le=50),
 ):
+    _merge_cache_control(response)
     limit = min(limit, MARKET_MOVERS_HARD_CAP)
     cached_response = load_cached_response("market:movers", MarketMoversResponse)
     if cached_response is None:
@@ -199,10 +211,12 @@ def market_movers(
 
 @router.get("/trending", response_model=MarketMoverListResponse)
 def market_trending(
+    response: Response,
     limit: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
     show_sync_service=Depends(get_show_sync_service),
 ):
+    _merge_cache_control(response)
     limit = min(limit, MARKET_TRENDING_HARD_CAP)
     return show_sync_service.get_trending_response(db, limit=limit)
 
@@ -228,8 +242,10 @@ def market_strategy_flips(
 
 @router.get("/floors", response_model=MarketOpportunityListResponse)
 def market_floors(
+    response: Response,
     limit: int = Query(default=25, ge=1, le=100),
 ):
+    _merge_cache_control(response)
     limit = min(limit, MARKET_FLOORS_HARD_CAP)
     cached_response = load_cached_response("market:floors", MarketOpportunityListResponse)
     if cached_response is None:
@@ -241,10 +257,12 @@ def market_floors(
 
 @router.get("/phases")
 def market_phases(
+    response: Response,
     db: Session = Depends(get_db),
     current_user=Depends(get_optional_user),
     recommendation_service=Depends(get_recommendation_service),
 ):
+    _merge_cache_control(response)
     return {
         "current": recommendation_service.get_phase(db, user=current_user),
         "history": recommendation_service.get_phase_history(db),

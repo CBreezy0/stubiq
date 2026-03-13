@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_show_sync_service
@@ -16,6 +16,7 @@ from app.schemas.show_sync import LiveMarketListingListResponse, LiveMarketListi
 router = APIRouter(prefix="/flips", tags=["flips"])
 
 TOP_FLIPS_HARD_CAP = 25
+CACHE_CONTROL_HEADER = "public, max-age=60"
 
 
 def top_flip_query_params(
@@ -44,6 +45,15 @@ def _normalize_text(value: Optional[str]) -> str:
     return value.strip().lower() if value else ""
 
 
+def _merge_cache_control(response: Response) -> None:
+    existing = response.headers.get("Cache-Control")
+    if not existing:
+        response.headers["Cache-Control"] = CACHE_CONTROL_HEADER
+        return
+    if CACHE_CONTROL_HEADER not in existing:
+        response.headers["Cache-Control"] = f"{existing}, {CACHE_CONTROL_HEADER}"
+
+
 def _sort_top_flip_items(items: list[LiveMarketListingResponse], sort_by: str) -> list[LiveMarketListingResponse]:
     field_name = "profit_after_tax" if sort_by in {"profit", "profit_after_tax"} else sort_by
 
@@ -56,8 +66,10 @@ def _sort_top_flip_items(items: list[LiveMarketListingResponse], sort_by: str) -
 
 @router.get("/top", response_model=LiveMarketListingListResponse)
 def top_flips(
+    response: Response,
     params=Depends(top_flip_query_params),
 ):
+    _merge_cache_control(response)
     cached_response = load_cached_response("flips:top", LiveMarketListingListResponse)
     if cached_response is None:
         return LiveMarketListingListResponse(count=0, items=[])

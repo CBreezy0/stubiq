@@ -130,6 +130,7 @@ def test_market_movers_endpoint(client, monkeypatch):
 
     response = client.get("/market/movers")
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=60"
     payload = response.json()
     assert payload["count"] == 1
     assert payload["items"]
