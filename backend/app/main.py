@@ -18,11 +18,13 @@ from app.api.routes.connections import router as connections_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.grind import router as grind_router
 from app.api.routes.health import router as health_router
+from app.api.routes.inventory import router as inventory_router
 from app.api.routes.investments import router as investments_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.market import router as market_router
 from app.api.routes.portfolio import router as portfolio_router
 from app.api.routes.settings import router as settings_router
+from app.api.routes.show_data import router as show_data_router
 from app.api.routes.users import router as users_router
 from app.config import Settings, get_settings
 from app.database import configure_database, create_session_factory, init_schema
@@ -36,12 +38,14 @@ from app.services import (
     AuthService,
     ConfigStore,
     ConnectionService,
+    InventoryService,
     GoogleTokenVerifierService,
     MarketDataService,
     MLBDataService,
     PortfolioService,
     RecommendationService,
     ShowApiAdapter,
+    ShowSyncService,
     MLBStatsAdapter,
     TokenService,
     UserService,
@@ -82,7 +86,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     connection_service = ConnectionService(settings, token_service)
     auth_rate_limiter = RateLimiter()
     market_data_service = MarketDataService(settings, show_adapter)
+    show_sync_service = ShowSyncService(settings, show_adapter, market_data_service)
     portfolio_service = PortfolioService(market_data_service)
+    inventory_service = InventoryService(market_data_service)
     mlb_data_service = MLBDataService(settings, mlb_adapter)
     recommendation_service = RecommendationService(settings, config_store, market_data_service, portfolio_service, user_service)
     scheduler_manager = SchedulerManager(settings, session_factory, market_data_service, mlb_data_service, recommendation_service)
@@ -137,7 +143,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app.state.connection_service = connection_service
     app.state.auth_rate_limiter = auth_rate_limiter
     app.state.market_data_service = market_data_service
+    app.state.show_sync_service = show_sync_service
     app.state.portfolio_service = portfolio_service
+    app.state.inventory_service = inventory_service
     app.state.mlb_data_service = mlb_data_service
     app.state.recommendation_service = recommendation_service
     app.state.scheduler_manager = scheduler_manager
@@ -160,9 +168,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app.include_router(investments_router)
     app.include_router(collections_router)
     app.include_router(portfolio_router)
+    app.include_router(inventory_router)
     app.include_router(grind_router)
     app.include_router(cards_router)
     app.include_router(settings_router)
+    app.include_router(show_data_router)
     app.include_router(jobs_router)
     return app
 

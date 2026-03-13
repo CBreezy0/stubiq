@@ -11,7 +11,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import Card, ListingsSnapshot, MarketHistoryAggregate, StrategyRecommendation
+from app.models import Card, ListingsSnapshot, MarketHistoryAggregate, ShowMetadataSnapshot, StrategyRecommendation, SystemSetting
 from app.services.show_api import ShowApiAdapter
 from app.utils.enums import MarketPhase
 from app.utils.scoring import quicksell_value_for_overall, safe_int, tax_adjusted_profit
@@ -29,20 +29,22 @@ class CardMarketContext:
 class MarketDataService:
     """Coordinates card catalog sync and historical market snapshot storage."""
 
+    ITEMS_CACHE_KEY = "show_items_full_sync"
+
     def __init__(self, settings: Settings, adapter: ShowApiAdapter):
         self.settings = settings
         self.adapter = adapter
 
     def sync_catalog_and_market(self, session: Session, current_phase: MarketPhase) -> Dict[str, int]:
-        items = self.adapter.fetch_items()
+        observed_at = utcnow()
+        items = self._load_items_for_sync(session, observed_at)
         listings = self.adapter.fetch_listings()
-        metadata = self.adapter.fetch_metadata()
+        metadata = self._load_metadata_for_sync(session, observed_at)
 
         print("Fetched items:", len(items))
         print("Fetched listings:", len(listings))
 
         synced_cards = 0
-        observed_at = utcnow()
         for item in items:
             card = self._upsert_card(session, item)
             if metadata:
@@ -55,6 +57,61 @@ class MarketDataService:
         session.flush()
         self.compute_market_aggregates(session, current_phase, observed_at)
         return {"cards": synced_cards, "listings": len(listings)}
+
+    def upsert_card_from_item(self, session: Session, item: Dict) -> Card:
+        return self._upsert_card(session, item)
+
+    def _load_items_for_sync(self, session: Session, as_of: datetime) -> List[Dict]:
+        has_cards = session.scalar(select(Card.id).limit(1)) is not None
+        if has_cards and not self._items_cache_stale(session, as_of):
+            return []
+        items = self.adapter.fetch_items(item_type="mlb_card")
+        self._touch_items_cache(session, as_of, len(items))
+        return items
+
+    def _load_metadata_for_sync(self, session: Session, as_of: datetime) -> Dict:
+        latest = session.scalar(select(ShowMetadataSnapshot).order_by(ShowMetadataSnapshot.fetched_at.desc()).limit(1))
+        cache_cutoff = as_of - timedelta(hours=self.settings.show_metadata_cache_hours)
+        if latest is not None and self._coerce_utc(latest.fetched_at) >= cache_cutoff:
+            return latest.payload_json
+        payload = self.adapter.fetch_metadata()
+        if payload:
+            session.add(
+                ShowMetadataSnapshot(
+                    series_json=list(payload.get("series", [])),
+                    brands_json=list(payload.get("brands", [])),
+                    sets_json=list(payload.get("sets", [])),
+                    payload_json=payload,
+                    fetched_at=as_of,
+                )
+            )
+        return payload
+
+    def _items_cache_stale(self, session: Session, as_of: datetime) -> bool:
+        setting = session.get(SystemSetting, self.ITEMS_CACHE_KEY)
+        if setting is None:
+            return True
+        last_synced_at = (setting.value_json or {}).get("last_synced_at")
+        if not last_synced_at:
+            return True
+        try:
+            parsed = datetime.fromisoformat(str(last_synced_at).replace("Z", "+00:00"))
+        except ValueError:
+            return True
+        parsed = self._coerce_utc(parsed)
+        return parsed < as_of - timedelta(hours=self.settings.show_items_cache_hours)
+
+    def _touch_items_cache(self, session: Session, as_of: datetime, count: int) -> None:
+        setting = session.get(SystemSetting, self.ITEMS_CACHE_KEY)
+        if setting is None:
+            setting = SystemSetting(key=self.ITEMS_CACHE_KEY)
+        setting.value_json = {"last_synced_at": as_of.isoformat(), "count": count}
+        setting.description = "Tracks the last full MLB items sync to avoid refetching the full item catalog every market cycle."
+        session.add(setting)
+
+    def record_listing_snapshot(self, session: Session, listing: Dict, observed_at: Optional[datetime] = None) -> ListingsSnapshot:
+        session.flush()
+        return self._record_snapshot(session, listing, observed_at or utcnow())
 
     def _upsert_card(self, session: Session, item: Dict) -> Card:
         item_id = str(item.get("uuid") or item.get("id") or item.get("item_id") or "")

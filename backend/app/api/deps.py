@@ -48,3 +48,13 @@ def get_user_service(request: Request):
 
 def get_connection_service(request: Request):
     return request.app.state.connection_service
+
+
+
+def get_show_sync_service(request: Request):
+    return request.app.state.show_sync_service
+
+
+
+def get_inventory_service(request: Request):
+    return request.app.state.inventory_service

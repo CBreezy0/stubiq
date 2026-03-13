@@ -34,6 +34,7 @@ class User(TimestampMixin, Base):
     connections: Mapped[list["UserConnection"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     portfolio_positions: Mapped[list["PortfolioPosition"]] = relationship(back_populates="user")
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="user")
+    inventory_items: Mapped[list["UserInventory"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class UserSettings(TimestampMixin, Base):

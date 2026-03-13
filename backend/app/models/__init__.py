@@ -22,6 +22,8 @@ from .domain import (
     SystemSetting,
     Transaction,
 )
+from .inventory import UserInventory
+from .show_sync import MarketListing, PriceHistory, ShowMetadataSnapshot, ShowPlayerProfile, ShowRosterUpdate
 from .user import User, UserSettings
 
 
@@ -34,6 +36,12 @@ def load_all_models():
         AuthAuditLog,
         UserConnection,
         Card,
+        MarketListing,
+        PriceHistory,
+        UserInventory,
+        ShowMetadataSnapshot,
+        ShowPlayerProfile,
+        ShowRosterUpdate,
         ListingsSnapshot,
         MarketHistoryAggregate,
         PlayerStatsDaily,
@@ -59,6 +67,12 @@ __all__ = [
     "AuthAuditLog",
     "UserConnection",
     "Card",
+    "MarketListing",
+    "PriceHistory",
+    "UserInventory",
+    "ShowMetadataSnapshot",
+    "ShowPlayerProfile",
+    "ShowRosterUpdate",
     "ListingsSnapshot",
     "MarketHistoryAggregate",
     "PlayerStatsDaily",

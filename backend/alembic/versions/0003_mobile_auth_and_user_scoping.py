@@ -1,6 +1,6 @@
 """add mobile auth, user settings, and user-scoped portfolio
 
-Revision ID: 0003_mobile_auth_and_user_scoping
+Revision ID: 0003_mobile_auth_user_scope
 Revises: 0002_roster_update_predictions
 Create Date: 2026-03-12 00:00:00.000000
 """
@@ -13,7 +13,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0003_mobile_auth_and_user_scoping"
+revision = "0003_mobile_auth_user_scope"
 down_revision = "0002_roster_update_predictions"
 branch_labels = None
 depends_on = None
@@ -57,15 +57,43 @@ def _scalar(sql: str, **params):
 
 
 
+def _postgres_enum_labels(enum_name: str) -> set[str]:
+    if op.get_bind().dialect.name != "postgresql":
+        return set()
+    rows = op.get_bind().execute(
+        sa.text(
+            """
+            SELECT enumlabel
+            FROM pg_enum
+            JOIN pg_type ON pg_enum.enumtypid = pg_type.oid
+            WHERE pg_type.typname = :enum_name
+            """
+        ),
+        {"enum_name": enum_name},
+    ).fetchall()
+    return {row[0] for row in rows}
+
+
+
+def _enum_seed_value(enum_name: str, preferred: str, fallback: str) -> str:
+    labels = _postgres_enum_labels(enum_name)
+    if preferred in labels:
+        return preferred
+    if fallback in labels:
+        return fallback
+    return preferred
+
+
+
 def _create_tables() -> None:
-    auth_provider_enum = sa.Enum("email", "google", name="authprovider")
-    connection_provider_enum = sa.Enum("xbox", "playstation", name="connectionprovider")
+    auth_provider_enum = sa.Enum("EMAIL", "GOOGLE", name="authprovider")
+    connection_provider_enum = sa.Enum("XBOX", "PLAYSTATION", name="connectionprovider")
     connection_status_enum = sa.Enum(
-        "not_connected",
-        "connected",
-        "expired",
-        "error",
-        "reconnect_required",
+        "NOT_CONNECTED",
+        "CONNECTED",
+        "EXPIRED",
+        "ERROR",
+        "RECONNECT_REQUIRED",
         name="connectionstatus",
     )
 
@@ -184,7 +212,7 @@ def _ensure_legacy_user() -> None:
                     "email": LEGACY_USER_EMAIL,
                     "display_name": "Legacy Portfolio",
                     "avatar_url": None,
-                    "auth_provider": "email",
+                    "auth_provider": _enum_seed_value("authprovider", "EMAIL", "email"),
                     "google_sub": None,
                     "password_hash": None,
                     "is_active": True,

@@ -1,7 +1,7 @@
 """add Apple auth fields, refresh reuse metadata, and auth audit logs
 
-Revision ID: 0004_apple_auth_audit_and_console_security
-Revises: 0003_mobile_auth_and_user_scoping
+Revision ID: 0004_apple_auth_console_sec
+Revises: 0003_mobile_auth_user_scope
 Create Date: 2026-03-12 08:30:00.000000
 """
 
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0004_apple_auth_audit_and_console_security"
-down_revision = "0003_mobile_auth_and_user_scoping"
+revision = "0004_apple_auth_console_sec"
+down_revision = "0003_mobile_auth_user_scope"
 branch_labels = None
 depends_on = None
 
@@ -58,9 +58,51 @@ def _postgres_enum_labels(enum_name: str) -> set[str]:
     return {row[0] for row in rows}
 
 
+def _normalize_postgres_enum_labels(enum_name: str, label_map: dict[str, str]) -> None:
+    if not _is_postgresql():
+        return
+
+    labels = _postgres_enum_labels(enum_name)
+    for old_label, new_label in label_map.items():
+        if old_label in labels and new_label not in labels:
+            op.execute(f"ALTER TYPE {enum_name} RENAME VALUE '{old_label}' TO '{new_label}'")
+            labels = _postgres_enum_labels(enum_name)
+
+
+
+def _ensure_enum_value(enum_name: str, value: str) -> None:
+    if _is_postgresql() and value not in _postgres_enum_labels(enum_name):
+        op.execute(f"ALTER TYPE {enum_name} ADD VALUE IF NOT EXISTS '{value}'")
+
+
+
 def _ensure_authprovider_contains_apple() -> None:
-    if _is_postgresql() and "apple" not in _postgres_enum_labels("authprovider"):
-        op.execute("ALTER TYPE authprovider ADD VALUE IF NOT EXISTS 'apple'")
+    _normalize_postgres_enum_labels(
+        "authprovider",
+        {
+            "email": "EMAIL",
+            "google": "GOOGLE",
+            "apple": "APPLE",
+        },
+    )
+    _normalize_postgres_enum_labels(
+        "connectionprovider",
+        {
+            "xbox": "XBOX",
+            "playstation": "PLAYSTATION",
+        },
+    )
+    _normalize_postgres_enum_labels(
+        "connectionstatus",
+        {
+            "not_connected": "NOT_CONNECTED",
+            "connected": "CONNECTED",
+            "expired": "EXPIRED",
+            "error": "ERROR",
+            "reconnect_required": "RECONNECT_REQUIRED",
+        },
+    )
+    _ensure_enum_value("authprovider", "APPLE")
 
 
 def _upgrade_users() -> None:

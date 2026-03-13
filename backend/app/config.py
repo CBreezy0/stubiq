@@ -118,6 +118,9 @@ class Settings:
     strategy_weights: Dict[str, float]
     engine_thresholds: Dict[str, float]
     quicksell_tiers: Dict[str, int]
+    show_items_cache_hours: int
+    show_metadata_cache_hours: int
+    market_trending_window_hours: int
     jwt_secret_key: str
     jwt_refresh_secret_key: str
     access_token_expire_minutes: int
@@ -207,7 +210,10 @@ def _default_database_url() -> str:
 def get_settings() -> Settings:
     game_year = _get_int_env("GAME_YEAR", 26)
     default_early_access, default_full_launch = _default_launch_dates(game_year)
-    show_api_base_url = os.getenv("SHOW_API_BASE_URL", "https://mlb25.theshow.com/apis")
+    show_api_base_url = os.getenv(
+        "SHOW_API_BASE_URL",
+        "https://mlb26.theshow.com/apis",
+    )
     market_phase_override = os.getenv("MARKET_PHASE_OVERRIDE")
 
     return Settings(
@@ -220,23 +226,23 @@ def get_settings() -> Settings:
         auto_seed_dev_data=_get_bool_env("AUTO_SEED_DEV_DATA", False),
         scheduler_enabled=_get_bool_env("SCHEDULER_ENABLED", True),
         database_url=os.getenv("DATABASE_URL", _default_database_url()),
-      cors_allow_origins=_get_csv_env(
-    "CORS_ALLOW_ORIGINS",
-    (
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "https://localhost:3000",
-        "https://localhost:3001",
-        "https://localhost:3002",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002",
-        "https://127.0.0.1:3000",
-        "https://127.0.0.1:3001",
-        "https://127.0.0.1:3002",
-    ),
-),
+        cors_allow_origins=_get_csv_env(
+            "CORS_ALLOW_ORIGINS",
+            (
+                "http://localhost:3000",
+                "http://localhost:3001",
+                "http://localhost:3002",
+                "https://localhost:3000",
+                "https://localhost:3001",
+                "https://localhost:3002",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:3001",
+                "http://127.0.0.1:3002",
+                "https://127.0.0.1:3000",
+                "https://127.0.0.1:3001",
+                "https://127.0.0.1:3002",
+            ),
+        ),
         game_year=game_year,
         show_api_base_url=show_api_base_url,
         mlb_stats_api_base_url=os.getenv("MLB_STATS_API_BASE_URL", "https://statsapi.mlb.com/api/v1"),
@@ -259,6 +265,9 @@ def get_settings() -> Settings:
         strategy_weights=_get_json_env("STRATEGY_WEIGHTS_JSON", DEFAULT_STRATEGY_WEIGHTS),
         engine_thresholds=_get_json_env("ENGINE_THRESHOLDS_JSON", DEFAULT_ENGINE_THRESHOLDS),
         quicksell_tiers=_get_json_env("QUICKSELL_TIERS_JSON", DEFAULT_QUICKSELL_TIERS),
+        show_items_cache_hours=_get_int_env("SHOW_ITEMS_CACHE_HOURS", 12),
+        show_metadata_cache_hours=_get_int_env("SHOW_METADATA_CACHE_HOURS", 24),
+        market_trending_window_hours=_get_int_env("MARKET_TRENDING_WINDOW_HOURS", 24),
         jwt_secret_key=os.getenv("JWT_SECRET_KEY", "dev-jwt-secret-change-me"),
         jwt_refresh_secret_key=os.getenv("JWT_REFRESH_SECRET_KEY", os.getenv("JWT_SECRET_KEY", "dev-jwt-secret-change-me")),
         access_token_expire_minutes=_get_int_env("ACCESS_TOKEN_EXPIRE_MINUTES", 30),

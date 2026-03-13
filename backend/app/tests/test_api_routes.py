@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi.testclient import TestClient
+
+from app.models import PriceHistory, ShowMetadataSnapshot, ShowRosterUpdate
+from app.utils.time import utcnow
 
 
 def _signup(client: TestClient, email: str = "api-user@example.com", password: str = "Password123!", display_name: str = "API User"):
@@ -35,10 +40,16 @@ def test_dashboard_summary_route(client):
 
 
 def test_market_endpoints(client):
+    listings = client.get("/market/listings")
     flips = client.get("/market/flips")
+    strategy_flips = client.get("/market/strategy-flips")
     floors = client.get("/market/floors")
+    assert listings.status_code == 200
     assert flips.status_code == 200
+    assert strategy_flips.status_code == 200
     assert floors.status_code == 200
+    assert listings.json()["items"]
+    assert {"uuid", "name", "best_buy_price", "best_sell_price", "spread", "profit_after_tax", "roi"}.issubset(listings.json()["items"][0])
 
 
 
@@ -168,3 +179,122 @@ def test_user_scoped_defaults_without_seed(app):
             "gatekeeper_hold_weight",
             "updated_at",
         }
+
+
+def test_show_sync_content_routes(client, app, monkeypatch):
+    with app.state.session_factory() as session:
+        session.add(
+            ShowMetadataSnapshot(
+                series_json=[{"series_id": 1, "name": "Live"}],
+                brands_json=[{"brand_id": 5, "name": "Diamond Dynasty"}],
+                sets_json=["CORE"],
+                payload_json={"series": [{"series_id": 1, "name": "Live"}], "brands": [{"brand_id": 5, "name": "Diamond Dynasty"}], "sets": ["CORE"]},
+                fetched_at=utcnow(),
+            )
+        )
+        session.add(
+            ShowRosterUpdate(
+                remote_id="7",
+                title="April Attribute Update",
+                summary="Boosted contact vs RHP.",
+                published_at=utcnow(),
+                payload_json={"id": 7, "title": "April Attribute Update"},
+                last_synced_at=utcnow(),
+            )
+        )
+        session.commit()
+
+    monkeypatch.setattr(
+        app.state.show_sync_service.adapter,
+        "search_player_profiles",
+        lambda username: {
+            "universal_profiles": [
+                {
+                    "username": username,
+                    "display_level": "Gold 50",
+                    "games_played": 123,
+                    "vanity": {"nameplate_equipped": "plate", "icon_equipped": "icon"},
+                    "most_played_modes": {"dd_time": "9999"},
+                    "lifetime_hitting_stats": [{"HR": 5.2}],
+                    "lifetime_defensive_stats": [{"ERA": 3.11}],
+                    "online_data": [{"year": "2026", "wins": "17"}],
+                }
+            ]
+        },
+    )
+
+    metadata_response = client.get("/metadata")
+    player_search_response = client.get("/player-search", params={"username": "Scann"})
+    roster_updates_response = client.get("/roster-updates")
+
+    assert metadata_response.status_code == 200
+    assert metadata_response.json()["series"][0]["name"] == "Live"
+
+    assert player_search_response.status_code == 200
+    payload = player_search_response.json()
+    assert payload["count"] == 1
+    assert payload["items"][0]["username"] == "Scann"
+
+    assert roster_updates_response.status_code == 200
+    assert roster_updates_response.json()["items"][0]["remote_id"] == "7"
+
+
+def test_market_filters_route(client):
+    response = client.get('/market/flips', params={'min_profit': 5000, 'rarity': 'Diamond', 'sort_by': 'roi'})
+    assert response.status_code == 200
+    payload = response.json()
+    for item in payload['items']:
+        assert (item['profit_after_tax'] or 0) >= 5000
+        assert item['rarity'] == 'Diamond'
+
+
+def test_market_history_and_movers_routes(client, app):
+    with app.state.session_factory() as session:
+        session.add_all([
+            PriceHistory(uuid='live-riley-greene-26', buy_price=4200, sell_price=5200, timestamp=utcnow() - timedelta(hours=23)),
+            PriceHistory(uuid='live-riley-greene-26', buy_price=5100, sell_price=6200, timestamp=utcnow()),
+            PriceHistory(uuid='live-ohtani-26', buy_price=160000, sell_price=190000, timestamp=utcnow() - timedelta(hours=23)),
+            PriceHistory(uuid='live-ohtani-26', buy_price=150000, sell_price=175000, timestamp=utcnow()),
+        ])
+        session.commit()
+
+    history_response = client.get('/market/history/live-riley-greene-26', params={'days': 1})
+    trending_response = client.get('/market/trending')
+    movers_response = client.get('/market/biggest-movers')
+
+    assert history_response.status_code == 200
+    assert len(history_response.json()['points']) >= 2
+
+    assert trending_response.status_code == 200
+    assert 'items' in trending_response.json()
+
+    assert movers_response.status_code == 200
+    assert 'items' in movers_response.json()
+
+
+def test_inventory_routes(client):
+    _, headers = _signup(client, email='inventory-user@example.com')
+
+    unauthorized = client.get('/inventory/me')
+    assert unauthorized.status_code == 401
+
+    import_response = client.post(
+        '/inventory/import',
+        headers=headers,
+        json={
+            'replace_existing': True,
+            'items': [
+                {'item_uuid': 'live-riley-greene-26', 'quantity': 3, 'is_sellable': True},
+                {'item_uuid': 'live-ohtani-26', 'quantity': 1, 'is_sellable': False},
+            ],
+        },
+    )
+    assert import_response.status_code == 200
+    assert import_response.json()['imported_count'] == 2
+
+    inventory_response = client.get('/inventory/me', headers=headers)
+    assert inventory_response.status_code == 200
+    payload = inventory_response.json()
+    assert payload['count'] == 2
+    assert payload['total_quantity'] == 4
+    assert {item['item_uuid'] for item in payload['items']} == {'live-riley-greene-26', 'live-ohtani-26'}
