@@ -11,7 +11,7 @@ import hashlib
 import json
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import Float, case, cast, func, literal, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
@@ -315,6 +315,8 @@ class ShowSyncService:
         force_refresh: bool = False,
     ) -> LiveMarketListingListResponse:
         limit = 50
+        if force_refresh:
+            logger.info("Ignoring force_refresh request; top flips endpoint now serves cached data only")
         try:
             filters = MarketQueryFilters(
                 min_roi=roi_min,
@@ -327,18 +329,12 @@ class ShowSyncService:
                 sort_order="desc",
                 limit=limit,
             )
-            rows = [
-                row.model_copy(
-                    update={
-                        "flip_score": self._ranked_flip_score(row.roi, row.liquidity_score),
-                    }
-                )
-                for row in self._build_listing_rows(session, force_refresh=force_refresh)
-                if (row.profit_after_tax or 0) > 0 and (row.roi or 0.0) > 0 and (row.liquidity_score or 0.0) > 0
-            ]
-            filtered = self._apply_listing_filters(rows, filters)
-            sorted_rows = self._sort_listing_rows(filtered, filters.sort_by, filters.sort_order, default_sort="flip_score")
-            return LiveMarketListingListResponse(count=min(len(sorted_rows), limit), items=sorted_rows[:limit])
+            if self._has_cached_market_listings(session):
+                items = self._top_flip_rows_from_market_listings(session, filters)
+            else:
+                logger.info("Serving top flips from cached snapshots because warm listing rows are unavailable")
+                items = self._top_flip_rows_from_snapshots(session, filters)
+            return LiveMarketListingListResponse(count=len(items), items=items)
         except SQLAlchemyError:
             logger.exception(
                 "Database query failed while building top flip listings response (sort_by=%s, rarity=%s, team=%s, series=%s)",
@@ -352,45 +348,357 @@ class ShowSyncService:
     def get_market_movers_response(self, session: Session, limit: int = 50) -> MarketMoversResponse:
         limit = max(1, min(limit, 50))
         try:
-            rows = self._build_listing_rows(session)
-            if not rows:
-                return MarketMoversResponse(count=0, items=[])
-            history_by_item = self._history_series_for_items(
-                session,
-                item_ids=[row.uuid for row in rows],
-                window_hours=max(self.settings.market_trending_window_hours, 25),
-            )
-            movers: list[MarketMoverItem] = []
-            for row in rows:
-                current_price = row.best_sell_price
-                previous_price = self._historical_price_before_window(
-                    history_by_item.get(row.uuid, []),
-                    current_timestamp=row.last_seen_at,
-                    hours_back=1,
-                )
-                if current_price is None or previous_price in (None, 0):
-                    continue
-                price_change = current_price - previous_price
-                change_percent = price_change / float(previous_price)
-                if abs(change_percent) < 0.10:
-                    continue
-                movers.append(
-                    MarketMoverItem(
-                        item_id=row.uuid,
-                        name=row.name,
-                        best_buy_price=row.best_buy_price,
-                        best_sell_price=row.best_sell_price,
-                        price_change=price_change,
-                        change_percent=round(change_percent, 4),
-                        liquidity_score=row.liquidity_score,
-                    )
-                )
-            movers.sort(key=lambda row: (abs(row.change_percent), abs(row.price_change)), reverse=True)
-            items = movers[:limit]
+            if self._has_cached_market_listings(session):
+                items = self._market_movers_from_market_listings(session, limit=limit)
+            else:
+                logger.info("Serving market movers from cached snapshots because warm listing rows are unavailable")
+                items = self._market_movers_from_snapshots(session, limit=limit)
             return MarketMoversResponse(count=len(items), items=items)
         except SQLAlchemyError:
             logger.exception("Database query failed while building market movers response (limit=%s)", limit)
             raise
+
+    def _has_cached_market_listings(self, session: Session) -> bool:
+        return session.scalar(select(MarketListing.id).limit(1)) is not None
+
+    def _top_flip_rows_from_market_listings(
+        self,
+        session: Session,
+        filters: MarketQueryFilters,
+    ) -> list[LiveMarketListingResponse]:
+        aggregate_subquery = self._latest_market_aggregate_subquery()
+        profit_expr = MarketListing.estimated_profit
+        roi_expr = MarketListing.roi_percent
+        liquidity_expr = aggregate_subquery.c.liquidity_score
+        sort_expr = self._top_flip_sort_expression(filters.sort_by, profit_expr, roi_expr, liquidity_expr)
+        query = (
+            select(
+                MarketListing.item_id.label("uuid"),
+                func.coalesce(MarketListing.listing_name, Card.name, MarketListing.item_id).label("name"),
+                MarketListing.best_buy_price.label("best_buy_price"),
+                MarketListing.best_sell_price.label("best_sell_price"),
+                MarketListing.spread.label("spread"),
+                profit_expr.label("profit_after_tax"),
+                roi_expr.label("roi"),
+                Card.display_position.label("position"),
+                Card.series.label("series"),
+                Card.team.label("team"),
+                Card.overall.label("overall"),
+                Card.rarity.label("rarity"),
+                literal(0).label("order_volume"),
+                liquidity_expr.label("liquidity_score"),
+                MarketListing.last_seen_at.label("last_seen_at"),
+            )
+            .select_from(MarketListing)
+            .outerjoin(Card, Card.item_id == MarketListing.item_id)
+            .outerjoin(aggregate_subquery, aggregate_subquery.c.item_id == MarketListing.item_id)
+            .where(profit_expr.is_not(None))
+            .where(profit_expr > 0)
+            .where(roi_expr.is_not(None))
+            .where(roi_expr > 0)
+            .where(liquidity_expr.is_not(None))
+            .where(liquidity_expr > 0)
+        )
+        query = self._apply_top_flip_sql_filters(
+            query,
+            filters,
+            roi_expr=roi_expr,
+            profit_expr=profit_expr,
+            liquidity_expr=liquidity_expr,
+            rarity_expr=Card.rarity,
+            team_expr=Card.team,
+            series_expr=Card.series,
+        )
+        rows = session.execute(
+            query.order_by(sort_expr.desc().nullslast(), MarketListing.last_seen_at.desc()).limit(filters.limit)
+        ).mappings().all()
+        return [self._live_listing_response_from_mapping(row) for row in rows]
+
+    def _top_flip_rows_from_snapshots(
+        self,
+        session: Session,
+        filters: MarketQueryFilters,
+    ) -> list[LiveMarketListingResponse]:
+        aggregate_subquery = self._latest_market_aggregate_subquery()
+        latest_snapshots = self._latest_snapshot_rows_subquery()
+        profit_expr = latest_snapshots.c.profit_after_tax
+        roi_expr = case(
+            (
+                latest_snapshots.c.best_buy_price > 0,
+                (cast(latest_snapshots.c.profit_after_tax, Float) / cast(latest_snapshots.c.best_buy_price, Float)) * 100.0,
+            ),
+            else_=None,
+        )
+        liquidity_expr = aggregate_subquery.c.liquidity_score
+        sort_expr = self._top_flip_sort_expression(filters.sort_by, profit_expr, roi_expr, liquidity_expr)
+        query = (
+            select(
+                latest_snapshots.c.item_id.label("uuid"),
+                func.coalesce(Card.name, latest_snapshots.c.item_id).label("name"),
+                latest_snapshots.c.best_buy_price.label("best_buy_price"),
+                latest_snapshots.c.best_sell_price.label("best_sell_price"),
+                latest_snapshots.c.spread.label("spread"),
+                profit_expr.label("profit_after_tax"),
+                roi_expr.label("roi"),
+                Card.display_position.label("position"),
+                Card.series.label("series"),
+                Card.team.label("team"),
+                Card.overall.label("overall"),
+                Card.rarity.label("rarity"),
+                literal(0).label("order_volume"),
+                liquidity_expr.label("liquidity_score"),
+                latest_snapshots.c.last_seen_at.label("last_seen_at"),
+            )
+            .select_from(latest_snapshots)
+            .outerjoin(Card, Card.item_id == latest_snapshots.c.item_id)
+            .outerjoin(aggregate_subquery, aggregate_subquery.c.item_id == latest_snapshots.c.item_id)
+            .where(profit_expr.is_not(None))
+            .where(profit_expr > 0)
+            .where(roi_expr.is_not(None))
+            .where(roi_expr > 0)
+            .where(liquidity_expr.is_not(None))
+            .where(liquidity_expr > 0)
+        )
+        query = self._apply_top_flip_sql_filters(
+            query,
+            filters,
+            roi_expr=roi_expr,
+            profit_expr=profit_expr,
+            liquidity_expr=liquidity_expr,
+            rarity_expr=Card.rarity,
+            team_expr=Card.team,
+            series_expr=Card.series,
+        )
+        rows = session.execute(
+            query.order_by(sort_expr.desc().nullslast(), latest_snapshots.c.last_seen_at.desc()).limit(filters.limit)
+        ).mappings().all()
+        return [self._live_listing_response_from_mapping(row) for row in rows]
+
+    def _market_movers_from_market_listings(self, session: Session, limit: int) -> list[MarketMoverItem]:
+        aggregate_subquery = self._latest_market_aggregate_subquery()
+        cutoff = utcnow() - timedelta(hours=1)
+        previous_history_price = (
+            select(PriceHistory.sell_price)
+            .where(PriceHistory.uuid == MarketListing.item_id)
+            .where(PriceHistory.sell_price.is_not(None))
+            .where(PriceHistory.timestamp < MarketListing.last_seen_at)
+            .where(PriceHistory.timestamp <= cutoff)
+            .order_by(PriceHistory.timestamp.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        previous_snapshot_price = (
+            select(ListingsSnapshot.best_sell_order)
+            .where(ListingsSnapshot.item_id == MarketListing.item_id)
+            .where(ListingsSnapshot.best_sell_order.is_not(None))
+            .where(ListingsSnapshot.observed_at < MarketListing.last_seen_at)
+            .where(ListingsSnapshot.observed_at <= cutoff)
+            .order_by(ListingsSnapshot.observed_at.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        previous_price_expr = func.coalesce(previous_history_price, previous_snapshot_price)
+        price_change_expr = MarketListing.best_sell_price - previous_price_expr
+        change_percent_expr = cast(price_change_expr, Float) / cast(previous_price_expr, Float)
+        rows = session.execute(
+            select(
+                MarketListing.item_id.label("item_id"),
+                func.coalesce(MarketListing.listing_name, Card.name, MarketListing.item_id).label("name"),
+                MarketListing.best_buy_price.label("best_buy_price"),
+                MarketListing.best_sell_price.label("best_sell_price"),
+                price_change_expr.label("price_change"),
+                change_percent_expr.label("change_percent"),
+                aggregate_subquery.c.liquidity_score.label("liquidity_score"),
+            )
+            .select_from(MarketListing)
+            .outerjoin(Card, Card.item_id == MarketListing.item_id)
+            .outerjoin(aggregate_subquery, aggregate_subquery.c.item_id == MarketListing.item_id)
+            .where(MarketListing.best_sell_price.is_not(None))
+            .where(previous_price_expr.is_not(None))
+            .where(previous_price_expr != 0)
+            .where(func.abs(change_percent_expr) >= 0.10)
+            .order_by(func.abs(change_percent_expr).desc(), func.abs(price_change_expr).desc())
+            .limit(limit)
+        ).mappings().all()
+        return self._market_mover_items_from_rows(rows)
+
+    def _market_movers_from_snapshots(self, session: Session, limit: int) -> list[MarketMoverItem]:
+        aggregate_subquery = self._latest_market_aggregate_subquery()
+        latest_snapshots = self._latest_snapshot_rows_subquery()
+        cutoff = utcnow() - timedelta(hours=1)
+        previous_history_price = (
+            select(PriceHistory.sell_price)
+            .where(PriceHistory.uuid == latest_snapshots.c.item_id)
+            .where(PriceHistory.sell_price.is_not(None))
+            .where(PriceHistory.timestamp < latest_snapshots.c.last_seen_at)
+            .where(PriceHistory.timestamp <= cutoff)
+            .order_by(PriceHistory.timestamp.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        previous_snapshot_price = (
+            select(ListingsSnapshot.best_sell_order)
+            .where(ListingsSnapshot.item_id == latest_snapshots.c.item_id)
+            .where(ListingsSnapshot.best_sell_order.is_not(None))
+            .where(ListingsSnapshot.observed_at < latest_snapshots.c.last_seen_at)
+            .where(ListingsSnapshot.observed_at <= cutoff)
+            .order_by(ListingsSnapshot.observed_at.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        previous_price_expr = func.coalesce(previous_history_price, previous_snapshot_price)
+        price_change_expr = latest_snapshots.c.best_sell_price - previous_price_expr
+        change_percent_expr = cast(price_change_expr, Float) / cast(previous_price_expr, Float)
+        rows = session.execute(
+            select(
+                latest_snapshots.c.item_id.label("item_id"),
+                func.coalesce(Card.name, latest_snapshots.c.item_id).label("name"),
+                latest_snapshots.c.best_buy_price.label("best_buy_price"),
+                latest_snapshots.c.best_sell_price.label("best_sell_price"),
+                price_change_expr.label("price_change"),
+                change_percent_expr.label("change_percent"),
+                aggregate_subquery.c.liquidity_score.label("liquidity_score"),
+            )
+            .select_from(latest_snapshots)
+            .outerjoin(Card, Card.item_id == latest_snapshots.c.item_id)
+            .outerjoin(aggregate_subquery, aggregate_subquery.c.item_id == latest_snapshots.c.item_id)
+            .where(latest_snapshots.c.best_sell_price.is_not(None))
+            .where(previous_price_expr.is_not(None))
+            .where(previous_price_expr != 0)
+            .where(func.abs(change_percent_expr) >= 0.10)
+            .order_by(func.abs(change_percent_expr).desc(), func.abs(price_change_expr).desc())
+            .limit(limit)
+        ).mappings().all()
+        return self._market_mover_items_from_rows(rows)
+
+    def _apply_top_flip_sql_filters(
+        self,
+        query,
+        filters: MarketQueryFilters,
+        *,
+        roi_expr,
+        profit_expr,
+        liquidity_expr,
+        rarity_expr,
+        team_expr,
+        series_expr,
+    ):
+        min_roi = self._normalize_roi_filter(filters.min_roi)
+        if min_roi is not None:
+            query = query.where(roi_expr >= min_roi)
+        if filters.min_profit is not None:
+            query = query.where(profit_expr >= filters.min_profit)
+        if filters.min_liquidity is not None:
+            query = query.where(liquidity_expr >= filters.min_liquidity)
+        if filters.rarity:
+            query = query.where(func.lower(rarity_expr) == filters.rarity.strip().lower())
+        if filters.team:
+            query = query.where(func.lower(team_expr) == filters.team.strip().lower())
+        if filters.series:
+            query = query.where(func.lower(series_expr) == filters.series.strip().lower())
+        return query
+
+    def _top_flip_sort_expression(self, sort_by: str, profit_expr, roi_expr, liquidity_expr):
+        normalized_sort = sort_by if sort_by in {"roi", "profit_after_tax", "profit_per_minute", "flip_score", "profit"} else "flip_score"
+        if normalized_sort in {"profit", "profit_after_tax"}:
+            return profit_expr
+        if normalized_sort == "roi":
+            return roi_expr
+        if normalized_sort == "profit_per_minute":
+            return cast(profit_expr, Float) * cast(liquidity_expr, Float)
+        return cast(roi_expr, Float) * cast(liquidity_expr, Float)
+
+    def _latest_market_aggregate_subquery(self):
+        ranked_aggregates = (
+            select(
+                MarketHistoryAggregate.item_id.label("item_id"),
+                MarketHistoryAggregate.liquidity_score.label("liquidity_score"),
+                func.row_number().over(
+                    partition_by=MarketHistoryAggregate.item_id,
+                    order_by=(MarketHistoryAggregate.updated_at.desc(), MarketHistoryAggregate.id.desc()),
+                ).label("rank"),
+            )
+            .subquery()
+        )
+        return (
+            select(
+                ranked_aggregates.c.item_id,
+                ranked_aggregates.c.liquidity_score,
+            )
+            .where(ranked_aggregates.c.rank == 1)
+            .subquery()
+        )
+
+    def _latest_snapshot_rows_subquery(self):
+        ranked_snapshots = (
+            select(
+                ListingsSnapshot.item_id.label("item_id"),
+                ListingsSnapshot.best_buy_order.label("best_buy_price"),
+                ListingsSnapshot.best_sell_order.label("best_sell_price"),
+                ListingsSnapshot.spread.label("spread"),
+                ListingsSnapshot.tax_adjusted_spread.label("profit_after_tax"),
+                ListingsSnapshot.observed_at.label("last_seen_at"),
+                func.row_number().over(
+                    partition_by=ListingsSnapshot.item_id,
+                    order_by=(ListingsSnapshot.observed_at.desc(), ListingsSnapshot.id.desc()),
+                ).label("rank"),
+            )
+            .subquery()
+        )
+        return (
+            select(
+                ranked_snapshots.c.item_id,
+                ranked_snapshots.c.best_buy_price,
+                ranked_snapshots.c.best_sell_price,
+                ranked_snapshots.c.spread,
+                ranked_snapshots.c.profit_after_tax,
+                ranked_snapshots.c.last_seen_at,
+            )
+            .where(ranked_snapshots.c.rank == 1)
+            .subquery()
+        )
+
+    def _live_listing_response_from_mapping(self, row) -> LiveMarketListingResponse:
+        profit_after_tax = row["profit_after_tax"]
+        liquidity_score = row["liquidity_score"]
+        roi = row["roi"]
+        return LiveMarketListingResponse(
+            uuid=row["uuid"],
+            name=row["name"],
+            best_buy_price=row["best_buy_price"],
+            best_sell_price=row["best_sell_price"],
+            spread=row["spread"],
+            profit_after_tax=profit_after_tax,
+            roi=round(float(roi), 2) if roi is not None else None,
+            position=row["position"],
+            series=row["series"],
+            team=row["team"],
+            overall=row["overall"],
+            rarity=row["rarity"],
+            order_volume=int(row["order_volume"] or 0),
+            liquidity_score=round(float(liquidity_score), 2) if liquidity_score is not None else None,
+            profit_per_minute=self._profit_per_minute(profit_after_tax, liquidity_score),
+            flip_score=self._ranked_flip_score(roi, liquidity_score),
+            last_seen_at=row["last_seen_at"],
+        )
+
+    def _market_mover_items_from_rows(self, rows) -> list[MarketMoverItem]:
+        items: list[MarketMoverItem] = []
+        for row in rows:
+            price_change = row["price_change"]
+            change_percent = row["change_percent"]
+            items.append(
+                MarketMoverItem(
+                    item_id=row["item_id"],
+                    name=row["name"],
+                    best_buy_price=row["best_buy_price"],
+                    best_sell_price=row["best_sell_price"],
+                    price_change=int(price_change),
+                    change_percent=round(float(change_percent), 4),
+                    liquidity_score=round(float(row["liquidity_score"]), 2) if row["liquidity_score"] is not None else None,
+                )
+            )
+        return items
 
     def get_market_history_response(self, session: Session, uuid: str, days: int = 1) -> PriceHistoryResponse:
         points = self._history_points_for_item(session, uuid, days)
