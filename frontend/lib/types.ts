@@ -9,6 +9,8 @@ export type MarketPhase =
   | 'STUB_SALE'
   | 'LATE_CYCLE';
 export type AuthProvider = 'email' | 'google' | 'apple';
+export type MarketSortField = 'profit' | 'roi' | 'spread' | 'flip_score' | 'name' | 'buy_price' | 'sell_price' | 'order_volume' | 'last_seen';
+export type SortOrder = 'asc' | 'desc';
 
 export interface CardSummary {
   item_id: string;
@@ -28,6 +30,29 @@ export interface CardSummary {
   latest_best_sell_order: number | null;
   latest_tax_adjusted_spread: number | null;
   observed_at: string | null;
+}
+
+export interface CardRecommendation {
+  recommendation_type: string;
+  action: RecommendationAction;
+  confidence: number;
+  expected_profit: number | null;
+  expected_value: number | null;
+  market_phase: MarketPhase;
+  rationale: string;
+  rationale_json: Record<string, unknown>;
+}
+
+export interface CardDetailResponse extends CardSummary {
+  metadata_json: Record<string, unknown>;
+  aggregate_phase: string | null;
+  avg_price_15m: number | null;
+  avg_price_1h: number | null;
+  avg_price_6h: number | null;
+  avg_price_24h: number | null;
+  volatility_score: number | null;
+  liquidity_score: number | null;
+  recommendations: CardRecommendation[];
 }
 
 export interface MarketPhaseResponse {
@@ -69,6 +94,117 @@ export interface MarketOpportunityListResponse {
   phase: MarketPhase;
   count: number;
   items: MarketOpportunity[];
+}
+
+export interface MarketListing {
+  uuid: string;
+  name: string;
+  best_buy_price: number | null;
+  best_sell_price: number | null;
+  spread: number | null;
+  profit_after_tax: number | null;
+  roi: number | null;
+  position: string | null;
+  series: string | null;
+  team: string | null;
+  overall: number | null;
+  rarity: string | null;
+  order_volume: number;
+  flip_score: number | null;
+  last_seen_at: string;
+}
+
+export type LiveMarketListing = MarketListing;
+export type FlipOpportunity = MarketListing;
+
+export interface LiveMarketListingListResponse {
+  count: number;
+  items: MarketListing[];
+}
+
+export interface MarketListingsQuery {
+  min_roi?: number | null;
+  min_profit?: number | null;
+  max_buy_price?: number | null;
+  rarity?: string | null;
+  series?: string | null;
+  team?: string | null;
+  position?: string | null;
+  sort_by?: MarketSortField | null;
+  sort_order?: SortOrder | null;
+  limit?: number | null;
+  refresh?: boolean | null;
+}
+
+export interface PriceHistoryPoint {
+  timestamp: string;
+  buy_price: number | null;
+  sell_price: number | null;
+}
+
+export interface PriceHistoryResponse {
+  uuid: string;
+  name: string | null;
+  days: number;
+  points: PriceHistoryPoint[];
+}
+
+export interface MarketMover {
+  uuid: string;
+  name: string;
+  current_price: number | null;
+  previous_price: number | null;
+  change_amount: number | null;
+  change_pct: number | null;
+  trend_score: number;
+  position: string | null;
+  series: string | null;
+  team: string | null;
+  rarity: string | null;
+  points: number;
+  last_seen_at: string | null;
+}
+
+export interface MarketMoverListResponse {
+  count: number;
+  items: MarketMover[];
+}
+
+export interface MetadataResponse {
+  series: Array<Record<string, unknown>>;
+  brands: Array<Record<string, unknown>>;
+  sets: unknown[];
+  fetched_at: string | null;
+}
+
+export interface PlayerSearchProfile {
+  username: string;
+  display_level: string | null;
+  games_played: number | null;
+  vanity_json: Record<string, unknown>;
+  most_played_modes_json: Record<string, unknown>;
+  lifetime_hitting_stats_json: Array<Record<string, unknown>>;
+  lifetime_defensive_stats_json: Array<Record<string, unknown>>;
+  online_data_json: Array<Record<string, unknown>>;
+  last_synced_at: string;
+}
+
+export interface PlayerSearchResponse {
+  count: number;
+  items: PlayerSearchProfile[];
+}
+
+export interface ShowRosterUpdateItem {
+  remote_id: string;
+  title: string | null;
+  summary: string | null;
+  published_at: string | null;
+  last_synced_at: string;
+}
+
+export interface ShowRosterUpdateListResponse {
+  count: number;
+  items: ShowRosterUpdateItem[];
 }
 
 export interface CollectionTarget {
@@ -206,6 +342,43 @@ export interface EngineThresholdsPatchRequest {
   grind_market_edge?: number;
   collection_lock_penalty?: number;
   gatekeeper_hold_weight?: number;
+}
+
+export interface InventoryItem {
+  item_uuid: string;
+  card: CardSummary;
+  quantity: number;
+  is_sellable: boolean;
+  synced_at: string;
+  current_price: number | null;
+  total_value: number | null;
+  profit_loss: number | null;
+}
+
+export interface InventorySummary {
+  count: number;
+  total_quantity: number;
+  total_market_value: number;
+  total_profit_loss: number;
+  items: InventoryItem[];
+}
+
+export interface InventoryImportItem {
+  item_uuid: string;
+  quantity: number;
+  is_sellable: boolean;
+  card_name?: string | null;
+}
+
+export interface InventoryImportPayload {
+  items: InventoryImportItem[];
+  replace_existing?: boolean;
+}
+
+export interface InventoryImportResponse {
+  imported_count: number;
+  replaced_existing: boolean;
+  inventory: InventorySummary;
 }
 
 export interface DashboardSummaryResponse {

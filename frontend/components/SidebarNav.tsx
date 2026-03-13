@@ -8,7 +8,12 @@ import { useAuth } from '@/context/AuthContext';
 
 const items = [
   { href: '/dashboard', label: 'Dashboard', description: 'Live market view' },
-  { href: '/portfolio', label: 'Portfolio', description: 'Owned cards and P/L' },
+  { href: '/market', label: 'Market', description: 'Current listings cache' },
+  { href: '/flips', label: 'Flips', description: 'Highest ROI spreads' },
+  { href: '/inventory', label: 'Inventory', description: 'Imported binder value' },
+  { href: '/player-search', label: 'Player Search', description: 'Universal profiles' },
+  { href: '/metadata', label: 'Metadata', description: 'Series and brands' },
+  { href: '/portfolio', label: 'Portfolio', description: 'Tracked positions and P/L' },
   { href: '/settings', label: 'Settings', description: 'Tune strategy thresholds' },
 ];
 
@@ -26,7 +31,7 @@ export function SidebarNav() {
     <div className="space-y-4">
       <nav className="flex gap-2 overflow-x-auto md:flex-col md:overflow-visible">
         {items.map((item) => {
-          const active = pathname === item.href;
+          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link
               key={item.href}
@@ -62,7 +67,7 @@ export function SidebarNav() {
         ) : (
           <>
             <div className="font-medium text-white">No active session</div>
-            <div className="mt-1 text-xs text-slate-400">Sign in to unlock portfolio and settings data.</div>
+            <div className="mt-1 text-xs text-slate-400">Sign in to unlock portfolio, inventory, and settings data.</div>
             <Link
               href="/login"
               className="mt-4 inline-flex w-full items-center justify-center rounded-2xl bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-400"

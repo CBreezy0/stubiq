@@ -1,10 +1,17 @@
 import clsx from 'clsx';
 
-import type { MarketPhase, RecommendationAction, MarketPhaseResponse, PortfolioPosition } from '@/lib/types';
+import type { MarketPhase, MarketPhaseResponse, PortfolioPosition, PriceHistoryPoint, RecommendationAction } from '@/lib/types';
 
 export function formatStubs(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return '—';
   return `${Math.round(value).toLocaleString()} stubs`;
+}
+
+export function formatSignedStubs(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return '—';
+  const rounded = Math.round(value);
+  const sign = rounded > 0 ? '+' : '';
+  return `${sign}${rounded.toLocaleString()} stubs`;
 }
 
 export function formatNumber(value: number | null | undefined, maximumFractionDigits = 0): string {
@@ -18,6 +25,12 @@ export function formatPercent(value: number | null | undefined, scale: 'unit' | 
   return `${normalized.toFixed(normalized >= 10 ? 0 : 1)}%`;
 }
 
+export function formatSignedPercent(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return '—';
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(Math.abs(value) >= 10 ? 0 : 1)}%`;
+}
+
 export function formatRelativeDate(value: string | null | undefined): string {
   if (!value) return '—';
   const date = new Date(value);
@@ -27,6 +40,17 @@ export function formatRelativeDate(value: string | null | undefined): string {
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+  }).format(date);
+}
+
+export function formatChartLabel(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
   }).format(date);
 }
 
@@ -79,7 +103,10 @@ export function summarizePortfolioTrend(positions: PortfolioPosition[]) {
   return sorted.map((position, index) => {
     runningValue += (position.current_market_value ?? position.avg_acquisition_cost) * position.quantity;
     return {
-      label: index === sorted.length - 1 ? 'Now' : new Date(position.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      label:
+        index === sorted.length - 1
+          ? 'Now'
+          : new Date(position.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       value: runningValue,
     };
   });
@@ -93,4 +120,51 @@ export function summarizeRarityDistribution(positions: PortfolioPosition[]) {
     buckets.set(label, current + position.quantity);
   }
   return Array.from(buckets.entries()).map(([name, value]) => ({ name, value }));
+}
+
+export function computePriceHistoryRoi(point: PriceHistoryPoint, taxRate = 0.1) {
+  if (point.buy_price == null || point.sell_price == null || point.buy_price <= 0) return null;
+  const afterTax = point.sell_price * (1 - taxRate);
+  return ((afterTax - point.buy_price) / point.buy_price) * 100;
+}
+
+export function buildPriceHistorySeries(points: PriceHistoryPoint[]) {
+  return points.map((point) => ({
+    label: formatChartLabel(point.timestamp),
+    timestamp: point.timestamp,
+    buyPrice: point.buy_price,
+    sellPrice: point.sell_price,
+    midPrice:
+      point.buy_price != null && point.sell_price != null
+        ? Math.round((point.buy_price + point.sell_price) / 2)
+        : point.sell_price ?? point.buy_price ?? null,
+    roi: computePriceHistoryRoi(point),
+  }));
+}
+
+export function spreadSignal(spread: number | null | undefined) {
+  if (spread == null) {
+    return { label: 'No spread', tone: 'slate' as const };
+  }
+  if (spread >= 2000) {
+    return { label: 'Wide', tone: 'emerald' as const };
+  }
+  if (spread >= 750) {
+    return { label: 'Healthy', tone: 'sky' as const };
+  }
+  if (spread > 0) {
+    return { label: 'Tight', tone: 'amber' as const };
+  }
+  return { label: 'Flat', tone: 'rose' as const };
+}
+
+export function toneClasses(tone: 'emerald' | 'sky' | 'amber' | 'rose' | 'slate') {
+  return clsx(
+    'inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium',
+    tone === 'emerald' && 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200',
+    tone === 'sky' && 'border-sky-400/30 bg-sky-400/10 text-sky-200',
+    tone === 'amber' && 'border-amber-400/30 bg-amber-400/10 text-amber-200',
+    tone === 'rose' && 'border-rose-400/30 bg-rose-400/10 text-rose-200',
+    tone === 'slate' && 'border-slate-600/60 bg-slate-800/60 text-slate-300',
+  );
 }
