@@ -19,6 +19,8 @@ from app.models import Card, ListingsSnapshot, MarketHistoryAggregate, MarketLis
 from app.schemas.show_sync import (
     CardPriceHistoryPointResponse,
     CardPriceHistoryResponse,
+    CardSearchItem,
+    CardSearchResponse,
     LiveMarketListingListResponse,
     LiveMarketListingResponse,
     MarketMoverListResponse,
@@ -367,6 +369,32 @@ class ShowSyncService:
         points = self._history_points_for_item(session, uuid, days)
         card = session.scalar(select(Card).where(Card.item_id == uuid))
         return PriceHistoryResponse(uuid=uuid, name=card.name if card else uuid, days=days, points=points)
+
+    def get_card_search_response(self, session: Session, q: str, limit: int = 50) -> CardSearchResponse:
+        query = q.strip().lower()
+        if not query:
+            return CardSearchResponse(items=[])
+        limit = max(1, min(limit, 50))
+        try:
+            rows = self._build_listing_rows(session)
+            items = [
+                CardSearchItem(
+                    item_id=row.uuid,
+                    name=row.name,
+                    team=row.team,
+                    series=row.series,
+                    best_sell_price=row.best_sell_price,
+                    best_buy_price=row.best_buy_price,
+                )
+                for row in rows
+                if query in row.name.lower()
+                or query in (row.team or "").lower()
+                or query in (row.series or "").lower()
+            ]
+            return CardSearchResponse(items=items[:limit])
+        except SQLAlchemyError:
+            logger.exception("Database query failed while building card search response for q=%s", q)
+            raise
 
     def get_card_price_history_response(self, session: Session, item_id: str) -> Optional[CardPriceHistoryResponse]:
         try:

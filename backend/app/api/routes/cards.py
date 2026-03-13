@@ -8,10 +8,19 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_recommendation_service, get_show_sync_service
 from app.database import get_db
 from app.schemas.cards import CardDetailResponse
-from app.schemas.show_sync import CardPriceHistoryResponse
+from app.schemas.show_sync import CardPriceHistoryResponse, CardSearchResponse
 from app.security.deps import get_optional_user
 
 router = APIRouter(prefix="/cards", tags=["cards"])
+
+
+@router.get("/search", response_model=CardSearchResponse)
+def card_search(
+    q: str,
+    db: Session = Depends(get_db),
+    show_sync_service=Depends(get_show_sync_service),
+):
+    return show_sync_service.get_card_search_response(db, q, limit=50)
 
 
 @router.get("/{item_id}", response_model=CardDetailResponse)

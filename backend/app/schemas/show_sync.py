@@ -169,6 +169,19 @@ class CardPriceHistoryResponse(BaseModel):
     points: list[CardPriceHistoryPointResponse] = Field(default_factory=list)
 
 
+class CardSearchItem(BaseModel):
+    item_id: str
+    name: str
+    team: Optional[str] = None
+    series: Optional[str] = None
+    best_sell_price: Optional[int] = None
+    best_buy_price: Optional[int] = None
+
+
+class CardSearchResponse(BaseModel):
+    items: list[CardSearchItem] = Field(default_factory=list)
+
+
 class MarketMoverResponse(BaseModel):
     uuid: str
     name: str
