@@ -10,10 +10,10 @@ from app.database import get_db
 from app.schemas.cards import CardDetailResponse
 from app.security.deps import get_optional_user
 
-router = APIRouter(tags=["cards"])
+router = APIRouter(prefix="/cards", tags=["cards"])
 
 
-@router.get("/cards/{item_id}", response_model=CardDetailResponse)
+@router.get("/{item_id}", response_model=CardDetailResponse)
 def card_detail(
     item_id: str,
     db: Session = Depends(get_db),

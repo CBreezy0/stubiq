@@ -16,6 +16,7 @@ from app.api.routes.cards import router as cards_router
 from app.api.routes.collections import router as collections_router
 from app.api.routes.connections import router as connections_router
 from app.api.routes.dashboard import router as dashboard_router
+from app.api.routes.flips import router as flips_router
 from app.api.routes.grind import router as grind_router
 from app.api.routes.health import router as health_router
 from app.api.routes.inventory import router as inventory_router
@@ -165,6 +166,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app.include_router(health_router)
     app.include_router(dashboard_router)
     app.include_router(market_router)
+    app.include_router(flips_router)
     app.include_router(investments_router)
     app.include_router(collections_router)
     app.include_router(portfolio_router)
