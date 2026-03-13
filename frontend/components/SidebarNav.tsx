@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import clsx from 'clsx';
@@ -21,6 +22,13 @@ export function SidebarNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { isAuthenticated, logout, user } = useAuth();
+  const [cardQuery, setCardQuery] = useState('');
+
+  const handleCardSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = cardQuery.trim();
+    router.push(query ? `/cards?q=${encodeURIComponent(query)}` : '/cards');
+  };
 
   const handleLogout = () => {
     logout();
@@ -29,6 +37,24 @@ export function SidebarNav() {
 
   return (
     <div className="space-y-4">
+      <form onSubmit={handleCardSearch} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+        <label className="block text-xs uppercase tracking-[0.25em] text-sky-300">Card search</label>
+        <div className="mt-3 flex gap-2">
+          <input
+            value={cardQuery}
+            onChange={(event) => setCardQuery(event.target.value)}
+            placeholder="Search cards..."
+            className="min-w-0 flex-1 rounded-2xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm text-white outline-none transition focus:border-sky-400"
+          />
+          <button
+            type="submit"
+            className="rounded-2xl bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-400"
+          >
+            Go
+          </button>
+        </div>
+      </form>
+
       <nav className="flex gap-2 overflow-x-auto md:flex-col md:overflow-visible">
         {items.map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
