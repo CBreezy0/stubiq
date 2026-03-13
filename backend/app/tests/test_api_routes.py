@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from fastapi.testclient import TestClient
 
-from app.models import MarketListing, PriceHistory, ShowMetadataSnapshot, ShowRosterUpdate
+from app.models import MarketListing, MarketMoverCache, PriceHistory, ShowMetadataSnapshot, ShowRosterUpdate
 from app.utils.time import utcnow
 
 
@@ -108,19 +108,16 @@ def test_market_endpoints(client):
 def test_market_movers_endpoint(client, app):
     now = utcnow()
     with app.state.session_factory() as session:
-        record = session.scalar(select(MarketListing).where(MarketListing.item_id == "live-riley-greene-26"))
+        record = session.scalar(select(MarketMoverCache).where(MarketMoverCache.item_id == "live-riley-greene-26"))
         if record is None:
-            record = MarketListing(item_id="live-riley-greene-26")
-        record.listing_name = "Riley Greene"
-        record.best_buy_price = 6000
-        record.best_sell_price = 7000
-        record.spread = 1000
-        record.estimated_profit = 300
-        record.roi_percent = 5.0
-        record.last_seen_at = now
+            record = MarketMoverCache(item_id="live-riley-greene-26", name="Riley Greene")
+        record.name = "Riley Greene"
+        record.current_price = 7000
+        record.previous_price = 5000
+        record.change_percent = 0.4
+        record.volume = 12
+        record.updated_at = now
         session.add(record)
-        session.add(PriceHistory(uuid="live-riley-greene-26", buy_price=4000, sell_price=5000, timestamp=now - timedelta(hours=2)))
-        session.add(PriceHistory(uuid="live-riley-greene-26", buy_price=6000, sell_price=7000, timestamp=now))
         session.commit()
 
     response = client.get("/market/movers")
@@ -130,6 +127,7 @@ def test_market_movers_endpoint(client, app):
     assert payload["items"]
     assert {"item_id", "name", "best_buy_price", "best_sell_price", "price_change", "change_percent", "liquidity_score"}.issubset(payload["items"][0])
     target = next(item for item in payload["items"] if item["item_id"] == "live-riley-greene-26")
+    assert target["best_sell_price"] == 7000
     assert target["price_change"] == 2000
     assert target["change_percent"] > 0.10
 

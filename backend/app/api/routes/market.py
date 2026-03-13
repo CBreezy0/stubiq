@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_recommendation_service, get_show_sync_service
 from app.database import get_db
+from app.models import MarketMoverCache
 from app.schemas.market import MarketOpportunityListResponse
-from app.schemas.show_sync import LiveMarketListingListResponse, MarketMoverListResponse, MarketMoversResponse, PriceHistoryResponse
+from app.schemas.show_sync import LiveMarketListingListResponse, MarketMoverItem, MarketMoverListResponse, MarketMoversResponse, PriceHistoryResponse
 from app.security.deps import get_optional_user
 
 router = APIRouter(prefix="/market", tags=["market"])
@@ -90,9 +92,28 @@ def market_history(
 def market_movers(
     limit: int = Query(default=50, ge=1, le=50),
     db: Session = Depends(get_db),
-    show_sync_service=Depends(get_show_sync_service),
 ):
-    return show_sync_service.get_market_movers_response(db, limit=limit)
+    rows = db.scalars(
+        select(MarketMoverCache)
+        .where(MarketMoverCache.change_percent.is_not(None))
+        .where(MarketMoverCache.current_price.is_not(None))
+        .where(MarketMoverCache.previous_price.is_not(None))
+        .order_by(MarketMoverCache.change_percent.desc(), MarketMoverCache.updated_at.desc())
+        .limit(limit)
+    ).all()
+    items = [
+        MarketMoverItem(
+            item_id=row.item_id,
+            name=row.name,
+            best_buy_price=None,
+            best_sell_price=row.current_price,
+            price_change=int(row.current_price - row.previous_price),
+            change_percent=float(row.change_percent),
+            liquidity_score=None,
+        )
+        for row in rows
+    ]
+    return MarketMoversResponse(count=len(items), items=items)
 
 
 @router.get("/trending", response_model=MarketMoverListResponse)
