@@ -508,16 +508,16 @@ class ShowSyncService:
 
     def _build_listing_rows(self, session: Session, force_refresh: bool = False) -> list[LiveMarketListingResponse]:
         if force_refresh:
-            self.sync_listings(session)
+            logger.info("Ignoring force_refresh request; market endpoints now serve cached data only")
         rows = self.list_market_listings(session, limit=self.DEFAULT_SCAN_LIMIT)
         if rows:
             return self._listing_rows_from_records(session, rows)
         snapshot_rows = self._listing_rows_from_snapshots(session)
         if snapshot_rows:
+            logger.info("Serving market endpoint response from cached snapshots because warm listing rows are unavailable")
             return snapshot_rows
-        self.sync_listings(session)
-        rows = self.list_market_listings(session, limit=self.DEFAULT_SCAN_LIMIT)
-        return self._listing_rows_from_records(session, rows)
+        logger.warning("No warm market data available; returning empty cached market response without syncing")
+        return []
 
     def _listing_rows_from_records(self, session: Session, rows: list[MarketListing]) -> list[LiveMarketListingResponse]:
         item_ids = [row.item_id for row in rows]
