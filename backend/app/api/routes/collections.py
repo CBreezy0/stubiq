@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+import logging
 
-from app.api.deps import get_recommendation_service
-from app.database import get_db
+from fastapi import APIRouter, Depends
 from app.schemas.collections import CollectionPriorityResponse
-from app.security.deps import get_optional_user
+from app.utils.enums import MarketPhase
 
 router = APIRouter(prefix="/collections", tags=["collections"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/priorities", response_model=CollectionPriorityResponse)
-def collection_priorities(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_optional_user),
-    recommendation_service=Depends(get_recommendation_service),
-):
-    return recommendation_service.get_collection_priorities(db, user=current_user)
+def collection_priorities():
+    logger.warning("Collections priorities is temporarily disabled to avoid heavy request-time computation")
+    return CollectionPriorityResponse(
+        market_phase=MarketPhase.STABILIZATION,
+        projected_completion_cost=0,
+        ranked_division_targets=[],
+        ranked_team_targets=[],
+        recommended_cards_to_lock=[],
+        recommended_cards_to_delay=[],
+    )
