@@ -13,6 +13,16 @@ from app.schemas.show_sync import LiveMarketListingListResponse
 router = APIRouter(prefix="/flips", tags=["flips"])
 
 
+@router.get("/top", response_model=LiveMarketListingListResponse)
+def top_flips(
+    db: Session = Depends(get_db),
+    show_sync_service=Depends(get_show_sync_service),
+):
+    response = show_sync_service.get_top_flip_listings_response(db)
+    db.commit()
+    return response
+
+
 @router.get("", response_model=LiveMarketListingListResponse)
 def flips(
     params=Depends(listing_query_params),

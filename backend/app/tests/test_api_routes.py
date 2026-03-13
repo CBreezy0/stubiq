@@ -57,14 +57,22 @@ def test_dashboard_summary_route(client):
 def test_market_endpoints(client):
     listings = client.get("/market/listings")
     flips = client.get("/market/flips")
+    top_flips = client.get("/flips/top")
     strategy_flips = client.get("/market/strategy-flips")
     floors = client.get("/market/floors")
     assert listings.status_code == 200
     assert flips.status_code == 200
+    assert top_flips.status_code == 200
     assert strategy_flips.status_code == 200
     assert floors.status_code == 200
     assert listings.json()["items"]
     assert {"uuid", "name", "best_buy_price", "best_sell_price", "spread", "profit_after_tax", "roi"}.issubset(listings.json()["items"][0])
+    if top_flips.json()["items"]:
+        top_items = top_flips.json()["items"]
+        assert len(top_items) <= 50
+        assert {"liquidity_score", "flip_score", "roi"}.issubset(top_items[0])
+        scores = [item["flip_score"] for item in top_items]
+        assert scores == sorted(scores, reverse=True)
 
 
 

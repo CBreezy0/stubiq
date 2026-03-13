@@ -15,7 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import Settings
-from app.models import Card, ListingsSnapshot, MarketListing, PriceHistory, ShowMetadataSnapshot, ShowPlayerProfile, ShowRosterUpdate
+from app.models import Card, ListingsSnapshot, MarketHistoryAggregate, MarketListing, PriceHistory, ShowMetadataSnapshot, ShowPlayerProfile, ShowRosterUpdate
 from app.schemas.show_sync import (
     LiveMarketListingListResponse,
     LiveMarketListingResponse,
@@ -268,6 +268,27 @@ class ShowSyncService:
             )
             raise
 
+    def get_top_flip_listings_response(self, session: Session, force_refresh: bool = False) -> LiveMarketListingListResponse:
+        limit = 50
+        try:
+            rows = [
+                row.model_copy(
+                    update={
+                        "flip_score": self._ranked_flip_score(row.roi, row.liquidity_score),
+                    }
+                )
+                for row in self._build_listing_rows(session, force_refresh=force_refresh)
+                if (row.profit_after_tax or 0) > 0 and (row.roi or 0.0) > 0 and (row.liquidity_score or 0.0) > 0
+            ]
+            rows.sort(
+                key=lambda row: ((row.flip_score or 0.0), (row.roi or 0.0), (row.liquidity_score or 0.0)),
+                reverse=True,
+            )
+            return LiveMarketListingListResponse(count=min(len(rows), limit), items=rows[:limit])
+        except SQLAlchemyError:
+            logger.exception("Database query failed while building top flip listings response")
+            raise
+
     def get_market_history_response(self, session: Session, uuid: str, days: int = 1) -> PriceHistoryResponse:
         points = self._history_points_for_item(session, uuid, days)
         card = session.scalar(select(Card).where(Card.item_id == uuid))
@@ -359,8 +380,13 @@ class ShowSyncService:
         return self._listing_rows_from_records(session, rows)
 
     def _listing_rows_from_records(self, session: Session, rows: list[MarketListing]) -> list[LiveMarketListingResponse]:
-        stats = self._history_stats_for_items(session, [row.item_id for row in rows])
-        return [self._listing_row_from_record(row, stats.get(row.item_id, {})) for row in rows]
+        item_ids = [row.item_id for row in rows]
+        stats = self._history_stats_for_items(session, item_ids)
+        aggregates = self.market_data_service.get_latest_aggregates(session)
+        return [
+            self._listing_row_from_record(row, stats.get(row.item_id, {}), aggregates.get(row.item_id))
+            for row in rows
+        ]
 
     def _listing_rows_from_snapshots(self, session: Session) -> list[LiveMarketListingResponse]:
         latest_snapshots = self.market_data_service.get_latest_snapshots(session)
@@ -371,10 +397,11 @@ class ShowSyncService:
             for card in session.scalars(select(Card).where(Card.item_id.in_(list(latest_snapshots.keys())))).all()
         }
         stats = self._history_stats_for_items(session, list(latest_snapshots.keys()))
+        aggregates = self.market_data_service.get_latest_aggregates(session)
         rows: list[LiveMarketListingResponse] = []
         for item_id, snapshot in latest_snapshots.items():
             card = cards.get(item_id)
-            rows.append(self._listing_row_from_snapshot(item_id, snapshot, card, stats.get(item_id, {})))
+            rows.append(self._listing_row_from_snapshot(item_id, snapshot, card, stats.get(item_id, {}), aggregates.get(item_id)))
         return rows
 
     def _apply_listing_filters(self, rows: list[LiveMarketListingResponse], filters: MarketQueryFilters) -> list[LiveMarketListingResponse]:
@@ -526,7 +553,12 @@ class ShowSyncService:
             }
         return stats
 
-    def _listing_row_from_record(self, record: MarketListing, stats: dict[str, int]) -> LiveMarketListingResponse:
+    def _listing_row_from_record(
+        self,
+        record: MarketListing,
+        stats: dict[str, int],
+        aggregate: Optional[MarketHistoryAggregate] = None,
+    ) -> LiveMarketListingResponse:
         card = record.card
         order_volume = int(stats.get("order_volume", 0))
         flip_score = self._flip_score(
@@ -549,6 +581,7 @@ class ShowSyncService:
             overall=card.overall if card else None,
             rarity=card.rarity if card else None,
             order_volume=order_volume,
+            liquidity_score=aggregate.liquidity_score if aggregate else None,
             flip_score=flip_score,
             last_seen_at=record.last_seen_at,
         )
@@ -559,6 +592,7 @@ class ShowSyncService:
         snapshot: ListingsSnapshot,
         card: Optional[Card],
         stats: dict[str, int],
+        aggregate: Optional[MarketHistoryAggregate] = None,
     ) -> LiveMarketListingResponse:
         metrics = self.compute_listing_metrics(snapshot.best_buy_order, snapshot.best_sell_order)
         order_volume = int(stats.get("order_volume", 0))
@@ -579,6 +613,7 @@ class ShowSyncService:
             overall=card.overall if card else None,
             rarity=card.rarity if card else None,
             order_volume=order_volume,
+            liquidity_score=aggregate.liquidity_score if aggregate else None,
             flip_score=self._flip_score(profit=profit, roi=roi, spread=spread, order_volume=order_volume),
             last_seen_at=snapshot.observed_at,
         )
@@ -596,6 +631,9 @@ class ShowSyncService:
         volume_score = clamp(order_volume * 5.0)
         spread_score = clamp(((spread or 0) / 800.0) * 100.0)
         return round((profit_score * 0.35) + (roi_score * 0.30) + (volume_score * 0.20) + (spread_score * 0.15), 2)
+
+    def _ranked_flip_score(self, roi: Optional[float], liquidity_score: Optional[float]) -> float:
+        return round((roi or 0.0) * (liquidity_score or 0.0), 2)
 
     def _normalize_roi_filter(self, value: Optional[float]) -> Optional[float]:
         if value is None:
