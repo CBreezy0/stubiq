@@ -757,7 +757,7 @@ class ShowSyncService:
             rarity=card.rarity if card else None,
             order_volume=order_volume,
             liquidity_score=aggregate.liquidity_score if aggregate else None,
-            profit_per_minute=self._profit_per_minute(record.estimated_profit, order_volume),
+            profit_per_minute=self._profit_per_minute(record.estimated_profit, aggregate.liquidity_score if aggregate else None),
             flip_score=flip_score,
             last_seen_at=record.last_seen_at,
         )
@@ -790,7 +790,7 @@ class ShowSyncService:
             rarity=card.rarity if card else None,
             order_volume=order_volume,
             liquidity_score=aggregate.liquidity_score if aggregate else None,
-            profit_per_minute=self._profit_per_minute(profit, order_volume),
+            profit_per_minute=self._profit_per_minute(profit, aggregate.liquidity_score if aggregate else None),
             flip_score=self._flip_score(profit=profit, roi=roi, spread=spread, order_volume=order_volume),
             last_seen_at=snapshot.observed_at,
         )
@@ -812,11 +812,10 @@ class ShowSyncService:
     def _ranked_flip_score(self, roi: Optional[float], liquidity_score: Optional[float]) -> float:
         return round((roi or 0.0) * (liquidity_score or 0.0), 2)
 
-    def _profit_per_minute(self, profit: Optional[int], order_volume: int) -> Optional[float]:
-        if profit is None or order_volume <= 0 or self.settings.market_trending_window_hours <= 0:
+    def _profit_per_minute(self, profit: Optional[int], liquidity_score: Optional[float]) -> Optional[float]:
+        if profit is None or liquidity_score is None:
             return None
-        window_minutes = self.settings.market_trending_window_hours * 60.0
-        return round((profit * order_volume) / window_minutes, 2)
+        return round(float(profit) * liquidity_score, 2)
 
     def _normalize_roi_filter(self, value: Optional[float]) -> Optional[float]:
         if value is None:
