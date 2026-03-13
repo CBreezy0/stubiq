@@ -22,7 +22,7 @@ services:
       AUTO_SEED_DEV_DATA: "false"
       SCHEDULER_ENABLED: "true"
     ports:
-      - "8000:8000"
+      - "8000:8080"
     depends_on:
       - postgres
 
