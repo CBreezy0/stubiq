@@ -20,6 +20,11 @@ from app.utils.enums import MarketPhase, RecommendationAction
 
 router = APIRouter(prefix="/market", tags=["market"])
 
+MARKET_LISTINGS_HARD_CAP = 50
+MARKET_MOVERS_HARD_CAP = 25
+MARKET_FLOORS_HARD_CAP = 25
+MARKET_TRENDING_HARD_CAP = 25
+
 
 def _latest_snapshot_subquery():
     ranked_snapshots = (
@@ -152,6 +157,7 @@ def market_listings(
     db: Session = Depends(get_db),
     show_sync_service=Depends(get_show_sync_service),
 ):
+    params["limit"] = min(params["limit"], MARKET_LISTINGS_HARD_CAP)
     response = show_sync_service.get_market_listings_response(db, **params)
     db.commit()
     return response
@@ -182,6 +188,7 @@ def market_history(
 def market_movers(
     limit: int = Query(default=50, ge=1, le=50),
 ):
+    limit = min(limit, MARKET_MOVERS_HARD_CAP)
     cached_response = load_cached_response("market:movers", MarketMoversResponse)
     if cached_response is None:
         return MarketMoversResponse(count=0, items=[])
@@ -196,6 +203,7 @@ def market_trending(
     db: Session = Depends(get_db),
     show_sync_service=Depends(get_show_sync_service),
 ):
+    limit = min(limit, MARKET_TRENDING_HARD_CAP)
     return show_sync_service.get_trending_response(db, limit=limit)
 
 
@@ -222,6 +230,7 @@ def market_strategy_flips(
 def market_floors(
     limit: int = Query(default=25, ge=1, le=100),
 ):
+    limit = min(limit, MARKET_FLOORS_HARD_CAP)
     cached_response = load_cached_response("market:floors", MarketOpportunityListResponse)
     if cached_response is None:
         return MarketOpportunityListResponse(phase=MarketPhase.STABILIZATION, count=0, items=[])

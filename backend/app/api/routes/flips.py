@@ -15,6 +15,8 @@ from app.schemas.show_sync import LiveMarketListingListResponse, LiveMarketListi
 
 router = APIRouter(prefix="/flips", tags=["flips"])
 
+TOP_FLIPS_HARD_CAP = 25
+
 
 def top_flip_query_params(
     roi_min: Optional[float] = Query(default=None),
@@ -86,7 +88,8 @@ def top_flips(
     if series:
         items = [item for item in items if _normalize_text(item.series) == series]
 
-    items = _sort_top_flip_items(items, params["sort_by"])[: params["limit"]]
+    limit = min(params["limit"], TOP_FLIPS_HARD_CAP)
+    items = _sort_top_flip_items(items, params["sort_by"])[:limit]
     return LiveMarketListingListResponse(count=len(items), items=items)
 
 

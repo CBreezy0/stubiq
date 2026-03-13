@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from fastapi.testclient import TestClient
 
-from app.models import MarketListing, MarketMoverCache, PriceHistory, ShowMetadataSnapshot, ShowRosterUpdate
+from app.models import MarketListing, PriceHistory, ShowMetadataSnapshot, ShowRosterUpdate
 from app.utils.time import utcnow
 
 
@@ -105,31 +105,153 @@ def test_market_endpoints(client):
         assert roi_scores == sorted(roi_scores, reverse=True)
 
 
-def test_market_movers_endpoint(client, app):
-    now = utcnow()
-    with app.state.session_factory() as session:
-        record = session.scalar(select(MarketMoverCache).where(MarketMoverCache.item_id == "live-riley-greene-26"))
-        if record is None:
-            record = MarketMoverCache(item_id="live-riley-greene-26", name="Riley Greene")
-        record.name = "Riley Greene"
-        record.current_price = 7000
-        record.previous_price = 5000
-        record.change_percent = 0.4
-        record.volume = 12
-        record.updated_at = now
-        session.add(record)
-        session.commit()
+def test_market_movers_endpoint(client, monkeypatch):
+    from app.api.routes import market as market_routes
+    from app.schemas.show_sync import MarketMoverItem, MarketMoversResponse
+
+    def fake_load_cached_response(cache_key, model_type):
+        assert cache_key == "market:movers"
+        return MarketMoversResponse(
+            count=1,
+            items=[
+                MarketMoverItem(
+                    item_id="live-riley-greene-26",
+                    name="Riley Greene",
+                    best_buy_price=None,
+                    best_sell_price=7000,
+                    price_change=2000,
+                    change_percent=0.4,
+                    liquidity_score=None,
+                )
+            ],
+        )
+
+    monkeypatch.setattr(market_routes, "load_cached_response", fake_load_cached_response)
 
     response = client.get("/market/movers")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["count"] <= 50
+    assert payload["count"] == 1
     assert payload["items"]
     assert {"item_id", "name", "best_buy_price", "best_sell_price", "price_change", "change_percent", "liquidity_score"}.issubset(payload["items"][0])
-    target = next(item for item in payload["items"] if item["item_id"] == "live-riley-greene-26")
+    target = payload["items"][0]
+    assert target["item_id"] == "live-riley-greene-26"
     assert target["best_sell_price"] == 7000
     assert target["price_change"] == 2000
     assert target["change_percent"] > 0.10
+
+
+def test_market_endpoint_limit_caps(client, app, monkeypatch):
+    from app.api.routes import flips as flips_routes
+    from app.api.routes import market as market_routes
+    from app.schemas.cards import CardSummaryResponse
+    from app.schemas.market import MarketOpportunityListResponse, MarketOpportunityResponse
+    from app.schemas.show_sync import (
+        LiveMarketListingListResponse,
+        LiveMarketListingResponse,
+        MarketMoverItem,
+        MarketMoverListResponse,
+        MarketMoversResponse,
+    )
+    from app.utils.enums import MarketPhase, RecommendationAction
+
+    now = utcnow()
+    captured_limits = {}
+
+    def make_flip(index: int) -> LiveMarketListingResponse:
+        return LiveMarketListingResponse(
+            uuid=f"card-{index}",
+            name=f"Card {index}",
+            best_buy_price=1000 + index,
+            best_sell_price=1500 + index,
+            spread=500,
+            profit_after_tax=350 + index,
+            roi=10.0 + index,
+            rarity="Diamond",
+            team="Dodgers",
+            series="Live",
+            liquidity_score=75.0,
+            profit_per_minute=200.0 + index,
+            flip_score=200.0 + index,
+            last_seen_at=now,
+        )
+
+    def make_floor(index: int) -> MarketOpportunityResponse:
+        return MarketOpportunityResponse(
+            item_id=f"floor-{index}",
+            card=CardSummaryResponse(
+                item_id=f"floor-{index}",
+                name=f"Floor Card {index}",
+                is_live_series=True,
+                latest_best_sell_order=1000 + index,
+                observed_at=now,
+            ),
+            action=RecommendationAction.WATCH,
+            expected_profit_per_flip=100,
+            fill_velocity_score=0.0,
+            liquidity_score=0.0,
+            risk_score=0.0,
+            floor_proximity_score=75.0,
+            market_phase=MarketPhase.STABILIZATION,
+            confidence=0.8,
+            rationale="cached",
+        )
+
+    def fake_flips_cache(cache_key, model_type):
+        assert cache_key == "flips:top"
+        items = [make_flip(index) for index in range(40)]
+        return LiveMarketListingListResponse(count=len(items), items=items)
+
+    def fake_market_cache(cache_key, model_type):
+        if cache_key == "market:movers":
+            items = [
+                MarketMoverItem(
+                    item_id=f"mover-{index}",
+                    name=f"Mover {index}",
+                    best_buy_price=None,
+                    best_sell_price=2000 + index,
+                    price_change=250 + index,
+                    change_percent=0.5 + (index / 100.0),
+                    liquidity_score=None,
+                )
+                for index in range(40)
+            ]
+            return MarketMoversResponse(count=len(items), items=items)
+        if cache_key == "market:floors":
+            items = [make_floor(index) for index in range(40)]
+            return MarketOpportunityListResponse(phase=MarketPhase.STABILIZATION, count=len(items), items=items)
+        return None
+
+    def fake_market_listings_response(db, **params):
+        captured_limits["market_listings"] = params["limit"]
+        return LiveMarketListingListResponse(count=0, items=[])
+
+    def fake_trending_response(db, limit):
+        captured_limits["market_trending"] = limit
+        return MarketMoverListResponse(count=0, items=[])
+
+    monkeypatch.setattr(flips_routes, "load_cached_response", fake_flips_cache)
+    monkeypatch.setattr(market_routes, "load_cached_response", fake_market_cache)
+    monkeypatch.setattr(app.state.show_sync_service, "get_market_listings_response", fake_market_listings_response)
+    monkeypatch.setattr(app.state.show_sync_service, "get_trending_response", fake_trending_response)
+
+    listings_response = client.get("/market/listings", params={"limit": 200})
+    top_flips_response = client.get("/flips/top", params={"limit": 50})
+    movers_response = client.get("/market/movers", params={"limit": 50})
+    floors_response = client.get("/market/floors", params={"limit": 100})
+    trending_response = client.get("/market/trending", params={"limit": 100})
+
+    assert listings_response.status_code == 200
+    assert top_flips_response.status_code == 200
+    assert movers_response.status_code == 200
+    assert floors_response.status_code == 200
+    assert trending_response.status_code == 200
+
+    assert captured_limits["market_listings"] == 50
+    assert captured_limits["market_trending"] == 25
+    assert top_flips_response.json()["count"] == 25
+    assert movers_response.json()["count"] == 25
+    assert floors_response.json()["count"] == 25
 
 
 def test_card_price_history_endpoint(client, app):
