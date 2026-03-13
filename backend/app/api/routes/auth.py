@@ -45,9 +45,18 @@ def _preflight_headers(request: Request) -> dict[str, str]:
     }
 
 
+def _preflight_response(request: Request) -> Response:
+    return Response(status_code=status.HTTP_200_OK, headers=_preflight_headers(request))
+
+
+@router.options("/signup", include_in_schema=False)
+def signup_preflight(request: Request):
+    return _preflight_response(request)
+
+
 @router.options("/{auth_path:path}", include_in_schema=False)
 def auth_preflight(auth_path: str, request: Request):
-    return Response(status_code=status.HTTP_200_OK, headers=_preflight_headers(request))
+    return _preflight_response(request)
 
 
 def _context(request: Request, *, device_name: str | None = None, platform: str | None = None) -> AuthRequestContext:
