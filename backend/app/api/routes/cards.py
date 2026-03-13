@@ -5,9 +5,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_recommendation_service
+from app.api.deps import get_recommendation_service, get_show_sync_service
 from app.database import get_db
 from app.schemas.cards import CardDetailResponse
+from app.schemas.show_sync import CardPriceHistoryResponse
 from app.security.deps import get_optional_user
 
 router = APIRouter(prefix="/cards", tags=["cards"])
@@ -24,3 +25,15 @@ def card_detail(
     if card is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card not found")
     return card
+
+
+@router.get("/{item_id}/history", response_model=CardPriceHistoryResponse)
+def card_price_history(
+    item_id: str,
+    db: Session = Depends(get_db),
+    show_sync_service=Depends(get_show_sync_service),
+):
+    response = show_sync_service.get_card_price_history_response(db, item_id)
+    if response is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card not found")
+    return response

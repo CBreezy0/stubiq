@@ -156,6 +156,19 @@ class PriceHistoryResponse(BaseModel):
     points: list[PriceHistoryPointResponse] = Field(default_factory=list)
 
 
+class CardPriceHistoryPointResponse(BaseModel):
+    timestamp: datetime
+    best_buy_price: Optional[int] = None
+    best_sell_price: Optional[int] = None
+    volume: Optional[int] = None
+
+
+class CardPriceHistoryResponse(BaseModel):
+    item_id: str
+    name: Optional[str] = None
+    points: list[CardPriceHistoryPointResponse] = Field(default_factory=list)
+
+
 class MarketMoverResponse(BaseModel):
     uuid: str
     name: str

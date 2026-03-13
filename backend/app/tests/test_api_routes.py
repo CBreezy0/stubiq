@@ -134,6 +134,31 @@ def test_market_movers_endpoint(client, app):
     assert target["change_percent"] > 0.10
 
 
+def test_card_price_history_endpoint(client, app):
+    now = utcnow()
+    with app.state.session_factory() as session:
+        session.query(PriceHistory).filter(PriceHistory.uuid == "live-riley-greene-26").delete()
+        for index in range(205):
+            session.add(
+                PriceHistory(
+                    uuid="live-riley-greene-26",
+                    buy_price=4000 + index,
+                    sell_price=5000 + index,
+                    timestamp=now - timedelta(minutes=205 - index),
+                )
+            )
+        session.commit()
+
+    response = client.get("/cards/live-riley-greene-26/history")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["item_id"] == "live-riley-greene-26"
+    assert len(payload["points"]) == 200
+    assert {"timestamp", "best_buy_price", "best_sell_price", "volume"}.issubset(payload["points"][0])
+    assert payload["points"][0]["timestamp"] < payload["points"][-1]["timestamp"]
+    assert payload["points"][0]["volume"] is None
+
+
 
 def test_portfolio_add_and_remove(client):
     _, headers = _signup(client)

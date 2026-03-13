@@ -17,6 +17,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.config import Settings
 from app.models import Card, ListingsSnapshot, MarketHistoryAggregate, MarketListing, PriceHistory, ShowMetadataSnapshot, ShowPlayerProfile, ShowRosterUpdate
 from app.schemas.show_sync import (
+    CardPriceHistoryPointResponse,
+    CardPriceHistoryResponse,
     LiveMarketListingListResponse,
     LiveMarketListingResponse,
     MarketMoverListResponse,
@@ -366,6 +368,17 @@ class ShowSyncService:
         card = session.scalar(select(Card).where(Card.item_id == uuid))
         return PriceHistoryResponse(uuid=uuid, name=card.name if card else uuid, days=days, points=points)
 
+    def get_card_price_history_response(self, session: Session, item_id: str) -> Optional[CardPriceHistoryResponse]:
+        try:
+            card = session.scalar(select(Card).where(Card.item_id == item_id))
+            if card is None:
+                return None
+            points = self._card_history_points(session, item_id=item_id, limit=200)
+            return CardPriceHistoryResponse(item_id=item_id, name=card.name, points=points)
+        except SQLAlchemyError:
+            logger.exception("Database query failed while building card price history response for item_id=%s", item_id)
+            raise
+
     def get_trending_response(self, session: Session, limit: int = 25) -> MarketMoverListResponse:
         rows = self._build_market_movers(session, window_hours=self.settings.market_trending_window_hours)
         rows = [row for row in rows if abs(row.change_pct or 0.0) >= 3.0]
@@ -551,6 +564,42 @@ class ShowSyncService:
                 sell_price=snapshot.best_sell_order,
             )
             for snapshot in snapshots
+        ]
+
+    def _card_history_points(self, session: Session, *, item_id: str, limit: int) -> list[CardPriceHistoryPointResponse]:
+        rows = session.scalars(
+            select(PriceHistory)
+            .where(PriceHistory.uuid == item_id)
+            .order_by(PriceHistory.timestamp.desc())
+            .limit(limit)
+        ).all()
+        if rows:
+            ordered_rows = list(reversed(rows))
+            return [
+                CardPriceHistoryPointResponse(
+                    timestamp=row.timestamp,
+                    best_buy_price=row.buy_price,
+                    best_sell_price=row.sell_price,
+                    volume=None,
+                )
+                for row in ordered_rows
+            ]
+
+        snapshots = session.scalars(
+            select(ListingsSnapshot)
+            .where(ListingsSnapshot.item_id == item_id)
+            .order_by(ListingsSnapshot.observed_at.desc())
+            .limit(limit)
+        ).all()
+        ordered_snapshots = list(reversed(snapshots))
+        return [
+            CardPriceHistoryPointResponse(
+                timestamp=snapshot.observed_at,
+                best_buy_price=snapshot.best_buy_order,
+                best_sell_price=snapshot.best_sell_order,
+                volume=None,
+            )
+            for snapshot in ordered_snapshots
         ]
 
     def _build_market_movers(self, session: Session, window_hours: int) -> list[MarketMoverResponse]:
