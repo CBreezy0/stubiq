@@ -22,7 +22,7 @@ def top_flip_query_params(
     rarity: Optional[str] = Query(default=None),
     team: Optional[str] = Query(default=None),
     series: Optional[str] = Query(default=None),
-    sort_by: Literal["roi", "profit", "profit_per_minute", "flip_score"] = Query(default="flip_score"),
+    sort_by: Literal["roi", "profit_after_tax", "profit_per_minute", "flip_score", "profit"] = Query(default="flip_score"),
 ):
     return {
         "roi_min": roi_min,

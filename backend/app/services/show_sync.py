@@ -558,6 +558,7 @@ class ShowSyncService:
                 "sell_price": row.best_sell_price or 0,
                 "spread": row.spread or 0,
                 "profit": row.profit_after_tax or 0,
+                "profit_after_tax": row.profit_after_tax or 0,
                 "profit_per_minute": row.profit_per_minute or 0.0,
                 "roi": row.roi or 0.0,
                 "flip_score": row.flip_score or 0.0,
@@ -823,7 +824,7 @@ class ShowSyncService:
         return round(value * 100.0, 4) if 0 < value < 1 else value
 
     def _coerce_sort_field(self, sort_by: str, default_sort: str) -> str:
-        valid_fields = {"name", "buy_price", "sell_price", "spread", "profit", "profit_per_minute", "roi", "flip_score", "order_volume", "last_seen"}
+        valid_fields = {"name", "buy_price", "sell_price", "spread", "profit", "profit_after_tax", "profit_per_minute", "roi", "flip_score", "order_volume", "last_seen"}
         return sort_by if sort_by in valid_fields else default_sort
 
     def _match_text(self, value: Optional[str], query: str) -> bool:
