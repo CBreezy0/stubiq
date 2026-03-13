@@ -1,6 +1,16 @@
+'use client';
+
+import { usePathname } from 'next/navigation';
+
 import { SidebarNav } from '@/components/SidebarNav';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
+  if (pathname === '/login') {
+    return <div className="min-h-screen">{children}</div>;
+  }
+
   return (
     <div className="min-h-screen">
       <div className="mx-auto grid min-h-screen max-w-[1600px] grid-cols-1 gap-6 px-4 py-4 sm:px-6 lg:grid-cols-[280px_minmax(0,1fr)] lg:px-8 lg:py-8">
@@ -13,7 +23,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <SidebarNav />
           <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-300">
             <div className="font-medium text-white">Live backend</div>
-            <div className="mt-1 text-slate-400">Reads data from your local FastAPI API and refreshes automatically while you play.</div>
+            <div className="mt-1 text-slate-400">Reads data from your deployed FastAPI API and refreshes automatically while you play.</div>
           </div>
         </aside>
         <main className="min-w-0">{children}</main>

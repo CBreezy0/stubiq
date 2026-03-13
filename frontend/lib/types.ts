@@ -8,6 +8,7 @@ export type MarketPhase =
   | 'CONTENT_DROP'
   | 'STUB_SALE'
   | 'LATE_CYCLE';
+export type AuthProvider = 'email' | 'google' | 'apple';
 
 export interface CardSummary {
   item_id: string;
@@ -217,6 +218,43 @@ export interface DashboardSummaryResponse {
   portfolio: PortfolioPosition[];
   top_sells: PortfolioRecommendation[];
   grind_recommendation: GrindRecommendationResponse;
+}
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  auth_provider: AuthProvider;
+  is_active: boolean;
+  is_verified: boolean;
+  created_at: string;
+  updated_at: string;
+  last_login_at: string | null;
+}
+
+export interface SignupPayload {
+  email: string;
+  password: string;
+  display_name?: string | null;
+  device_name?: string | null;
+  platform?: string | null;
+}
+
+export interface LoginPayload {
+  email: string;
+  password: string;
+  device_name?: string | null;
+  platform?: string | null;
+}
+
+export interface AuthTokenResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  access_token_expires_in: number;
+  refresh_token_expires_in: number;
+  user: AuthUser;
 }
 
 export interface ApiErrorPayload {

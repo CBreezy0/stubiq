@@ -1,9 +1,11 @@
 import type {
+  AuthTokenResponse,
   CollectionPriorityResponse,
   DashboardSummaryResponse,
   EngineThresholdsPatchRequest,
   EngineThresholdsResponse,
   GrindRecommendationResponse,
+  LoginPayload,
   ManualAddPayload,
   ManualRemovePayload,
   MarketOpportunityListResponse,
@@ -12,9 +14,17 @@ import type {
   PortfolioRecommendation,
   PortfolioResponse,
   RosterUpdateRecommendationListResponse,
+  SignupPayload,
+  AuthUser,
 } from '@/lib/types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';
+const DEFAULT_API_BASE_URL = 'https://stubiq-production.up.railway.app';
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/$/, '');
+const ACCESS_TOKEN_STORAGE_KEY = 'stubiq.access_token';
+
+type ApiRequestInit = RequestInit & {
+  accessToken?: string | null;
+};
 
 export class ApiError extends Error {
   status: number;
@@ -25,13 +35,42 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+function canUseDOM() {
+  return typeof window !== 'undefined';
+}
+
+export function getStoredAccessToken() {
+  if (!canUseDOM()) return null;
+  return window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+}
+
+export function setStoredAccessToken(token: string) {
+  if (!canUseDOM()) return;
+  window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, token);
+}
+
+export function clearStoredAccessToken() {
+  if (!canUseDOM()) return;
+  window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+}
+
+async function request<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
+  const { accessToken, headers, ...requestInit } = init;
+  const requestHeaders = new Headers(headers ?? {});
+  requestHeaders.set('Accept', 'application/json');
+
+  const resolvedAccessToken = accessToken ?? getStoredAccessToken();
+  if (resolvedAccessToken) {
+    requestHeaders.set('Authorization', `Bearer ${resolvedAccessToken}`);
+  }
+
+  if (!(requestInit.body instanceof FormData) && requestInit.body && !requestHeaders.has('Content-Type')) {
+    requestHeaders.set('Content-Type', 'application/json');
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    ...requestInit,
+    headers: requestHeaders,
     cache: 'no-store',
   });
 
@@ -51,6 +90,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  signup: (payload: SignupPayload) =>
+    request<AuthTokenResponse>('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  login: (payload: LoginPayload) =>
+    request<AuthTokenResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getMe: (accessToken?: string | null) => request<AuthUser>('/auth/me', { accessToken }),
   getDashboardSummary: () => request<DashboardSummaryResponse>('/dashboard/summary'),
   getMarketPhases: () => request<MarketPhasesResponse>('/market/phases'),
   getFlips: (limit = 10) => request<MarketOpportunityListResponse>(`/market/flips?limit=${limit}`),
@@ -64,19 +114,16 @@ export const api = {
   patchEngineThresholds: (payload: EngineThresholdsPatchRequest) =>
     request<EngineThresholdsResponse>('/settings/engine-thresholds', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
   manualAddCard: (payload: ManualAddPayload) =>
     request<PortfolioResponse>('/portfolio/manual-add', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ source: 'manual', ...payload }),
     }),
   manualRemoveCard: (payload: ManualRemovePayload) =>
     request<PortfolioResponse>('/portfolio/manual-remove', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
   importPortfolioCsv: async (file: File) => {
@@ -89,4 +136,4 @@ export const api = {
   },
 };
 
-export { API_BASE_URL };
+export { ACCESS_TOKEN_STORAGE_KEY, API_BASE_URL };

@@ -9,12 +9,13 @@ import { MetricCard } from '@/components/MetricCard';
 import { PortfolioHoldingsTable } from '@/components/PortfolioHoldingsTable';
 import { PortfolioTrendChart } from '@/components/PortfolioTrendChart';
 import { RarityDistributionChart } from '@/components/RarityDistributionChart';
+import { RequireAuth } from '@/components/RequireAuth';
 import { useToast } from '@/components/ToastProvider';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useDashboard } from '@/hooks/useDashboard';
 import { formatStubs } from '@/lib/utils';
 
-export default function PortfolioPage() {
+function PortfolioContent() {
   const { portfolio, recommendations, addCard, removeCard } = usePortfolio();
   const { phase } = useDashboard();
   const { push } = useToast();
@@ -76,11 +77,11 @@ export default function PortfolioPage() {
     <div className="space-y-6">
       <MarketPhaseBanner phase={phase.data?.current} />
 
-      <section className="grid gap-4 xl:grid-cols-4 md:grid-cols-2">
-        <MetricCard title="Total Portfolio Value" value={formatStubs(portfolio.data?.total_market_value ?? 0)} hint="Current marked-to-market stub value" />
-        <MetricCard title="Total Invested" value={formatStubs(portfolio.data?.total_cost_basis ?? 0)} hint="Tracked acquisition cost basis" />
-        <MetricCard title="Unrealized P/L" value={formatStubs(portfolio.data?.total_unrealized_profit ?? 0)} hint="Live mark-to-market profit or loss" />
-        <MetricCard title="Realized P/L" value="Pending" hint="Add a transaction summary endpoint to unlock realized performance." />
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard title="Tracked Cards" value={String(portfolio.data?.total_positions ?? 0)} hint="Unique portfolio positions" />
+        <MetricCard title="Market Value" value={formatStubs(portfolio.data?.total_market_value ?? 0)} hint="Estimated sell-now value" />
+        <MetricCard title="Cost Basis" value={formatStubs(portfolio.data?.total_cost_basis ?? 0)} hint="Total invested stubs" />
+        <MetricCard title="Unrealized P/L" value={formatStubs(portfolio.data?.total_unrealized_profit ?? 0)} hint="Current mark-to-market edge" />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">
@@ -131,5 +132,13 @@ export default function PortfolioPage() {
         </div>
       </section>
     </div>
+  );
+}
+
+export default function PortfolioPage() {
+  return (
+    <RequireAuth>
+      <PortfolioContent />
+    </RequireAuth>
   );
 }

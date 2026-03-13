@@ -7,6 +7,7 @@ from typing import Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect
 from sqlalchemy.engine import make_url
 
@@ -117,6 +118,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         version="1.0.0",
         lifespan=lifespan,
     )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_allow_origins),
+        allow_credentials=True,
+        allow_methods=['*'],
+        allow_headers=['*'],
+    )
+    logger.info('CORS enabled for origins: %s', ', '.join(settings.cors_allow_origins))
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = session_factory

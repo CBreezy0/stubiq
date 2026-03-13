@@ -9,11 +9,12 @@ import { LoadingState } from '@/components/LoadingState';
 import { MarketPhaseBanner } from '@/components/MarketPhaseBanner';
 import { MetricCard } from '@/components/MetricCard';
 import { RecommendationFeed } from '@/components/RecommendationFeed';
+import { RequireAuth } from '@/components/RequireAuth';
 import { RosterTargetsTable } from '@/components/RosterTargetsTable';
 import { useDashboard } from '@/hooks/useDashboard';
 import { formatStubs, marketPhaseLabels } from '@/lib/utils';
 
-export default function DashboardPage() {
+function DashboardContent() {
   const { phase, flips, floors, rosterTargets, collections, portfolioRecommendations, grindRecommendation, portfolio } = useDashboard();
 
   if (phase.isLoading && !phase.data) {
@@ -27,7 +28,7 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <MarketPhaseBanner phase={phase.data?.current} />
 
-      <section className="grid gap-4 xl:grid-cols-4 md:grid-cols-2">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard title="Market Phase" value={phaseLabel} hint={phase.data?.current.override_active ? 'Manual override active' : 'Auto-detected'} />
         <MetricCard title="Top Flips" value={String(flips.data?.count ?? 0)} hint="Refreshes every 30 seconds" />
         <MetricCard title="Roster Targets" value={String(rosterTargets.data?.count ?? 0)} hint="Live Series upgrade candidates" />
@@ -50,8 +51,16 @@ export default function DashboardPage() {
       </section>
 
       {phase.error && !phase.data ? (
-        <EmptyState title="Dashboard data is unavailable" description="The API could not be reached. Verify the local backend is running at the configured base URL." />
+        <EmptyState title="Dashboard data is unavailable" description="The API could not be reached. Verify the deployed backend is healthy and reachable from the configured base URL." />
       ) : null}
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <RequireAuth>
+      <DashboardContent />
+    </RequireAuth>
   );
 }

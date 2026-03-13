@@ -91,6 +91,15 @@ docs/
 scripts/
 ```
 
+
+## GitHub Topics
+
+This repository is tagged with:
+
+fastapi • postgresql • nextjs • swiftui • ios-app • mlb-the-show • sports-analytics • marketplace • trading-dashboard • full-stack
+
+These topics improve discoverability on GitHub.
+
 ## Getting Started
 
 ```bash
@@ -123,6 +132,28 @@ ruby ios/MLBShowDashboard/scripts/generate_project.rb
 ```
 
 Then open `ios/MLBShowDashboard/MLBShowDashboard.xcodeproj` in Xcode and run the app on a simulator.
+
+## Database
+
+StubIQ uses Neon serverless PostgreSQL.
+
+To configure locally:
+
+Create `backend/.env`
+
+```bash
+DATABASE_URL=postgresql://username:password@host/dbname?sslmode=require
+```
+
+Neon requires SSL connections, so keep `?sslmode=require` in the connection string.
+
+Start the API:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+The database tables will be created automatically on startup.
 
 ## Configuration
 

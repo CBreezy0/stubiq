@@ -5,7 +5,7 @@ Next.js App Router frontend for the MLB The Show Diamond Dynasty market intellig
 ## Prerequisites
 
 - Node.js 18+
-- Backend API running locally at `http://127.0.0.1:8000`
+- Railway API available at `https://stubiq-production.up.railway.app`
 
 ## Setup
 
@@ -28,7 +28,12 @@ npm run start
 
 ## Environment
 
-- `NEXT_PUBLIC_API_BASE_URL` — FastAPI base URL. Defaults to `http://127.0.0.1:8000`.
+- `NEXT_PUBLIC_API_BASE_URL` — FastAPI base URL. Defaults to `https://stubiq-production.up.railway.app` in `.env.example`.
+- For local API development, override it in `frontend/.env.local`, for example:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+```
 
 ## Routes
 
@@ -40,6 +45,9 @@ npm run start
 
 The UI integrates with these backend routes:
 
+- `GET /auth/me`
+- `POST /auth/signup`
+- `POST /auth/login`
 - `GET /market/phases`
 - `GET /market/flips`
 - `GET /market/floors`

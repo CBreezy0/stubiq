@@ -1,6 +1,9 @@
+'use client';
+
+import { RequireAuth } from '@/components/RequireAuth';
 import { ThresholdEditor } from '@/components/ThresholdEditor';
 
-export default function SettingsPage() {
+function SettingsContent() {
   return (
     <div className="space-y-6">
       <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg">
@@ -12,5 +15,13 @@ export default function SettingsPage() {
       </section>
       <ThresholdEditor />
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <RequireAuth>
+      <SettingsContent />
+    </RequireAuth>
   );
 }
