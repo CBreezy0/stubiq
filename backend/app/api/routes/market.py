@@ -5,17 +5,106 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_recommendation_service, get_show_sync_service
 from app.database import get_db
-from app.models import MarketMoverCache
-from app.schemas.market import MarketOpportunityListResponse
+from app.models import Card, FloorOpportunity, ListingsSnapshot, MarketMoverCache, MarketPhaseCache
+from app.schemas.cards import CardSummaryResponse
+from app.schemas.market import MarketOpportunityListResponse, MarketOpportunityResponse
 from app.schemas.show_sync import LiveMarketListingListResponse, MarketMoverItem, MarketMoverListResponse, MarketMoversResponse, PriceHistoryResponse
 from app.security.deps import get_optional_user
+from app.utils.enums import MarketPhase, RecommendationAction
 
 router = APIRouter(prefix="/market", tags=["market"])
+
+
+def _latest_snapshot_subquery():
+    ranked_snapshots = (
+        select(
+            ListingsSnapshot.item_id.label("item_id"),
+            ListingsSnapshot.buy_now.label("buy_now"),
+            ListingsSnapshot.sell_now.label("sell_now"),
+            ListingsSnapshot.best_buy_order.label("best_buy_order"),
+            ListingsSnapshot.best_sell_order.label("best_sell_order"),
+            ListingsSnapshot.tax_adjusted_spread.label("tax_adjusted_spread"),
+            ListingsSnapshot.observed_at.label("observed_at"),
+            func.row_number().over(
+                partition_by=ListingsSnapshot.item_id,
+                order_by=(ListingsSnapshot.observed_at.desc(), ListingsSnapshot.id.desc()),
+            ).label("rank"),
+        )
+        .subquery()
+    )
+    return (
+        select(
+            ranked_snapshots.c.item_id,
+            ranked_snapshots.c.buy_now,
+            ranked_snapshots.c.sell_now,
+            ranked_snapshots.c.best_buy_order,
+            ranked_snapshots.c.best_sell_order,
+            ranked_snapshots.c.tax_adjusted_spread,
+            ranked_snapshots.c.observed_at,
+        )
+        .where(ranked_snapshots.c.rank == 1)
+        .subquery()
+    )
+
+
+def _cached_market_phase(db: Session) -> MarketPhase:
+    phase = db.scalar(select(MarketPhaseCache.phase).order_by(MarketPhaseCache.updated_at.desc()).limit(1))
+    return phase or MarketPhase.STABILIZATION
+
+
+def _cached_floor_action(row: FloorOpportunity) -> RecommendationAction:
+    if row.expected_value is not None and row.floor_price not in (None, 0) and row.expected_value >= float(row.floor_price):
+        return RecommendationAction.BUY
+    return RecommendationAction.WATCH
+
+
+def _cached_floor_response(
+    row: FloorOpportunity,
+    card: Card | None,
+    snapshot_row,
+    phase: MarketPhase,
+) -> MarketOpportunityResponse:
+    expected_profit = None
+    if row.expected_value is not None and row.floor_price is not None:
+        expected_profit = int(round(float(row.expected_value) - float(row.floor_price)))
+    floor_score = max(0.0, min(float(row.roi or 0.0), 100.0))
+    card_summary = CardSummaryResponse(
+        item_id=row.item_id,
+        name=row.name or (card.name if card else row.item_id),
+        series=card.series if card else None,
+        team=card.team if card else None,
+        division=card.division if card else None,
+        league=card.league if card else None,
+        overall=card.overall if card else None,
+        rarity=card.rarity if card else None,
+        display_position=card.display_position if card else None,
+        is_live_series=card.is_live_series if card else False,
+        quicksell_value=card.quicksell_value if card else None,
+        latest_buy_now=snapshot_row.buy_now if snapshot_row is not None else None,
+        latest_sell_now=snapshot_row.sell_now if snapshot_row is not None else None,
+        latest_best_buy_order=snapshot_row.best_buy_order if snapshot_row is not None else None,
+        latest_best_sell_order=(snapshot_row.best_sell_order if snapshot_row is not None else row.floor_price),
+        latest_tax_adjusted_spread=snapshot_row.tax_adjusted_spread if snapshot_row is not None else None,
+        observed_at=snapshot_row.observed_at if snapshot_row is not None else row.updated_at,
+    )
+    return MarketOpportunityResponse(
+        item_id=row.item_id,
+        card=card_summary,
+        action=_cached_floor_action(row),
+        expected_profit_per_flip=expected_profit,
+        fill_velocity_score=0.0,
+        liquidity_score=0.0,
+        risk_score=0.0,
+        floor_proximity_score=floor_score,
+        market_phase=phase,
+        confidence=1.0 if row.roi is not None else 0.0,
+        rationale="Served from precomputed floor opportunities cache.",
+    )
 
 
 def listing_query_params(
@@ -148,10 +237,19 @@ def market_strategy_flips(
 def market_floors(
     limit: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user=Depends(get_optional_user),
-    recommendation_service=Depends(get_recommendation_service),
 ):
-    return recommendation_service.get_floor_buys(db, limit=limit, user=current_user)
+    latest_snapshots = _latest_snapshot_subquery()
+    phase = _cached_market_phase(db)
+    rows = db.execute(
+        select(FloorOpportunity, Card, latest_snapshots)
+        .select_from(FloorOpportunity)
+        .outerjoin(Card, Card.item_id == FloorOpportunity.item_id)
+        .outerjoin(latest_snapshots, latest_snapshots.c.item_id == FloorOpportunity.item_id)
+        .order_by(FloorOpportunity.roi.desc().nullslast(), FloorOpportunity.updated_at.desc())
+        .limit(limit)
+    ).all()
+    items = [_cached_floor_response(row, card, snapshot_row, phase) for row, card, snapshot_row in rows]
+    return MarketOpportunityListResponse(phase=phase, count=len(items), items=items)
 
 
 @router.get("/phases")
