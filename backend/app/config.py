@@ -98,6 +98,7 @@ class Settings:
     auto_seed_dev_data: bool
     scheduler_enabled: bool
     database_url: str
+    cors_allow_origins: Tuple[str, ...]
     game_year: int
     show_api_base_url: str
     mlb_stats_api_base_url: str
@@ -172,6 +173,15 @@ def _get_json_env(name: str, default: Dict[str, Any]) -> Dict[str, Any]:
 
 
 
+def _get_csv_env(name: str, default: Tuple[str, ...]) -> Tuple[str, ...]:
+    value = os.getenv(name)
+    if value is None:
+        return tuple(default)
+    items = tuple(item.strip() for item in value.split(',') if item.strip())
+    return items or tuple(default)
+
+
+
 def _default_launch_dates(game_year: int) -> Tuple[date, date]:
     if game_year in LAUNCH_DATE_DEFAULTS:
         return LAUNCH_DATE_DEFAULTS[game_year]
@@ -210,6 +220,17 @@ def get_settings() -> Settings:
         auto_seed_dev_data=_get_bool_env("AUTO_SEED_DEV_DATA", False),
         scheduler_enabled=_get_bool_env("SCHEDULER_ENABLED", True),
         database_url=os.getenv("DATABASE_URL", _default_database_url()),
+      cors_allow_origins=_get_csv_env(
+    "CORS_ALLOW_ORIGINS",
+    (
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:3002",
+    ),
+),
         game_year=game_year,
         show_api_base_url=show_api_base_url,
         mlb_stats_api_base_url=os.getenv("MLB_STATS_API_BASE_URL", "https://statsapi.mlb.com/api/v1"),
