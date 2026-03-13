@@ -203,7 +203,7 @@ class MarketMoverListResponse(BaseModel):
     items: list[MarketMoverResponse] = Field(default_factory=list)
 
 
-class MarketPriceMoverResponse(BaseModel):
+class MarketMoverItem(BaseModel):
     item_id: str
     name: str
     best_buy_price: Optional[int] = None
@@ -213,9 +213,13 @@ class MarketPriceMoverResponse(BaseModel):
     liquidity_score: Optional[float] = None
 
 
-class MarketPriceMoverListResponse(BaseModel):
+class MarketMoversResponse(BaseModel):
     count: int
-    items: list[MarketPriceMoverResponse] = Field(default_factory=list)
+    items: list[MarketMoverItem] = Field(default_factory=list)
+
+
+MarketPriceMoverResponse = MarketMoverItem
+MarketPriceMoverListResponse = MarketMoversResponse
 
 
 class ShowMetadataResponse(BaseModel):

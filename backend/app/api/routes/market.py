@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_recommendation_service, get_show_sync_service
 from app.database import get_db
 from app.schemas.market import MarketOpportunityListResponse
-from app.schemas.show_sync import LiveMarketListingListResponse, MarketMoverListResponse, MarketPriceMoverListResponse, PriceHistoryResponse
+from app.schemas.show_sync import LiveMarketListingListResponse, MarketMoverListResponse, MarketMoversResponse, PriceHistoryResponse
 from app.security.deps import get_optional_user
 
 router = APIRouter(prefix="/market", tags=["market"])
@@ -76,12 +76,13 @@ def market_history(
     return show_sync_service.get_market_history_response(db, uuid=uuid, days=days)
 
 
-@router.get("/movers", response_model=MarketPriceMoverListResponse)
+@router.get("/movers", response_model=MarketMoversResponse)
 def market_movers(
+    limit: int = Query(default=50, ge=1, le=50),
     db: Session = Depends(get_db),
     show_sync_service=Depends(get_show_sync_service),
 ):
-    return show_sync_service.get_market_movers_response(db, limit=50)
+    return show_sync_service.get_market_movers_response(db, limit=limit)
 
 
 @router.get("/trending", response_model=MarketMoverListResponse)
