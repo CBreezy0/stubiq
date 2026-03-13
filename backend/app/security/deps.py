@@ -40,6 +40,9 @@ def auth_rate_limit(
     request: Request,
     limiter=Depends(get_auth_rate_limiter),
 ):
+    # Allow CORS preflight requests to pass through the rate limiter
+    if request.method == "OPTIONS":
+        return
     settings = request.app.state.settings
     client_ip = request.headers.get("x-forwarded-for")
     if client_ip:
