@@ -21,6 +21,8 @@ from app.schemas.show_sync import (
     LiveMarketListingResponse,
     MarketMoverListResponse,
     MarketMoverResponse,
+    MarketPriceMoverListResponse,
+    MarketPriceMoverResponse,
     PriceHistoryPointResponse,
     PriceHistoryResponse,
     ShowListingsPagePayload,
@@ -317,6 +319,48 @@ class ShowSyncService:
             )
             raise
 
+    def get_market_movers_response(self, session: Session, limit: int = 50) -> MarketPriceMoverListResponse:
+        try:
+            rows = self._build_listing_rows(session)
+            if not rows:
+                return MarketPriceMoverListResponse(count=0, items=[])
+            history_by_item = self._history_series_for_items(
+                session,
+                item_ids=[row.uuid for row in rows],
+                window_hours=max(self.settings.market_trending_window_hours, 25),
+            )
+            movers: list[MarketPriceMoverResponse] = []
+            for row in rows:
+                current_price = row.best_sell_price if row.best_sell_price is not None else row.best_buy_price
+                previous_price = self._historical_price_before_window(
+                    history_by_item.get(row.uuid, []),
+                    current_timestamp=row.last_seen_at,
+                    hours_back=1,
+                )
+                if current_price is None or previous_price in (None, 0):
+                    continue
+                price_change = current_price - previous_price
+                change_percent = price_change / float(previous_price)
+                if change_percent <= 0.10:
+                    continue
+                movers.append(
+                    MarketPriceMoverResponse(
+                        item_id=row.uuid,
+                        name=row.name,
+                        best_buy_price=row.best_buy_price,
+                        best_sell_price=row.best_sell_price,
+                        price_change=price_change,
+                        change_percent=round(change_percent, 4),
+                        liquidity_score=row.liquidity_score,
+                    )
+                )
+            movers.sort(key=lambda row: (row.change_percent, row.price_change), reverse=True)
+            items = movers[:limit]
+            return MarketPriceMoverListResponse(count=len(items), items=items)
+        except SQLAlchemyError:
+            logger.exception("Database query failed while building market movers response")
+            raise
+
     def get_market_history_response(self, session: Session, uuid: str, days: int = 1) -> PriceHistoryResponse:
         points = self._history_points_for_item(session, uuid, days)
         card = session.scalar(select(Card).where(Card.item_id == uuid))
@@ -583,6 +627,29 @@ class ShowSyncService:
                 "order_volume": order_volume,
             }
         return stats
+
+    def _historical_price_before_window(
+        self,
+        points: list[tuple[datetime, Optional[int], Optional[int]]],
+        *,
+        current_timestamp: datetime,
+        hours_back: int,
+    ) -> Optional[int]:
+        if not points:
+            return None
+        target_time = current_timestamp - timedelta(hours=hours_back)
+        fallback_price: Optional[int] = None
+        target_price: Optional[int] = None
+        for timestamp, buy_price, sell_price in points:
+            if timestamp >= current_timestamp:
+                break
+            candidate_price = sell_price if sell_price is not None else buy_price
+            if candidate_price is None:
+                continue
+            fallback_price = candidate_price
+            if timestamp <= target_time:
+                target_price = candidate_price
+        return target_price if target_price is not None else fallback_price
 
     def _listing_row_from_record(
         self,

@@ -177,6 +177,21 @@ class MarketMoverListResponse(BaseModel):
     items: list[MarketMoverResponse] = Field(default_factory=list)
 
 
+class MarketPriceMoverResponse(BaseModel):
+    item_id: str
+    name: str
+    best_buy_price: Optional[int] = None
+    best_sell_price: Optional[int] = None
+    price_change: int
+    change_percent: float
+    liquidity_score: Optional[float] = None
+
+
+class MarketPriceMoverListResponse(BaseModel):
+    count: int
+    items: list[MarketPriceMoverResponse] = Field(default_factory=list)
+
+
 class ShowMetadataResponse(BaseModel):
     series: list[dict[str, Any]] = Field(default_factory=list)
     brands: list[dict[str, Any]] = Field(default_factory=list)
