@@ -141,6 +141,24 @@ def test_market_movers_endpoint(client, monkeypatch):
     assert target["change_percent"] > 0.10
 
 
+def test_market_listings_service_caps_limit_before_loading(app, monkeypatch):
+    service = app.state.show_sync_service
+    captured = {}
+
+    def fake_build_listing_rows(session, force_refresh=False, limit=50):
+        captured["limit"] = limit
+        return []
+
+    monkeypatch.setattr(service, "_build_listing_rows", fake_build_listing_rows)
+
+    with app.state.session_factory() as session:
+        response = service.get_market_listings_response(session, limit=200)
+
+    assert captured["limit"] == 50
+    assert response.count == 0
+    assert response.items == []
+
+
 def test_market_endpoint_limit_caps(client, app, monkeypatch):
     from app.api.routes import flips as flips_routes
     from app.api.routes import market as market_routes

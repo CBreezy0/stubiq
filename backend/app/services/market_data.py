@@ -237,13 +237,19 @@ class MarketDataService:
         cards = session.scalars(select(Card)).all()
         return [CardMarketContext(card, latest_snapshots.get(card.item_id), latest_aggregates.get(card.item_id)) for card in cards]
 
-    def get_latest_snapshots(self, session: Session) -> Dict[str, ListingsSnapshot]:
-        subquery = (
-            select(ListingsSnapshot.item_id, func.max(ListingsSnapshot.observed_at).label("observed_at"))
-            .group_by(ListingsSnapshot.item_id)
-            .subquery()
-        )
-        rows = session.execute(
+    def get_latest_snapshots(
+        self,
+        session: Session,
+        item_ids: Optional[Sequence[str]] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, ListingsSnapshot]:
+        if item_ids is not None and not item_ids:
+            return {}
+        subquery = select(ListingsSnapshot.item_id, func.max(ListingsSnapshot.observed_at).label("observed_at"))
+        if item_ids is not None:
+            subquery = subquery.where(ListingsSnapshot.item_id.in_(list(item_ids)))
+        subquery = subquery.group_by(ListingsSnapshot.item_id).subquery()
+        query = (
             select(ListingsSnapshot)
             .join(
                 subquery,
@@ -252,25 +258,32 @@ class MarketDataService:
                     ListingsSnapshot.observed_at == subquery.c.observed_at,
                 ),
             )
-        ).scalars().all()
+            .order_by(ListingsSnapshot.observed_at.desc(), ListingsSnapshot.id.desc())
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        rows = session.execute(query).scalars().all()
         return {row.item_id: row for row in rows}
 
-    def get_latest_aggregates(self, session: Session) -> Dict[str, MarketHistoryAggregate]:
-        subquery = (
-            select(MarketHistoryAggregate.item_id, func.max(MarketHistoryAggregate.updated_at).label("updated_at"))
-            .group_by(MarketHistoryAggregate.item_id)
-            .subquery()
+    def get_latest_aggregates(
+        self,
+        session: Session,
+        item_ids: Optional[Sequence[str]] = None,
+    ) -> Dict[str, MarketHistoryAggregate]:
+        if item_ids is not None and not item_ids:
+            return {}
+        subquery = select(MarketHistoryAggregate.item_id, func.max(MarketHistoryAggregate.updated_at).label("updated_at"))
+        if item_ids is not None:
+            subquery = subquery.where(MarketHistoryAggregate.item_id.in_(list(item_ids)))
+        subquery = subquery.group_by(MarketHistoryAggregate.item_id).subquery()
+        query = select(MarketHistoryAggregate).join(
+            subquery,
+            and_(
+                MarketHistoryAggregate.item_id == subquery.c.item_id,
+                MarketHistoryAggregate.updated_at == subquery.c.updated_at,
+            ),
         )
-        rows = session.execute(
-            select(MarketHistoryAggregate)
-            .join(
-                subquery,
-                and_(
-                    MarketHistoryAggregate.item_id == subquery.c.item_id,
-                    MarketHistoryAggregate.updated_at == subquery.c.updated_at,
-                ),
-            )
-        ).scalars().all()
+        rows = session.execute(query).scalars().all()
         return {row.item_id: row for row in rows}
 
     def get_card_context(self, session: Session, item_id: str) -> Optional[CardMarketContext]:

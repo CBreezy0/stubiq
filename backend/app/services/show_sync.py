@@ -68,6 +68,7 @@ class ShowSyncService:
     """Validates MLB 26 payloads and persists reusable market-supporting data."""
 
     DEFAULT_SCAN_LIMIT = 2000
+    MARKET_LISTINGS_HARD_CAP = 50
     BATCH_SIZE = 50
     BATCH_PAUSE_SECONDS = 0.2
 
@@ -229,6 +230,7 @@ class ShowSyncService:
         limit: int = 50,
         force_refresh: bool = False,
     ) -> LiveMarketListingListResponse:
+        limit = max(1, min(limit, self.MARKET_LISTINGS_HARD_CAP))
         try:
             filters = MarketQueryFilters(
                 min_roi=min_roi,
@@ -242,7 +244,7 @@ class ShowSyncService:
                 sort_order=sort_order,
                 limit=limit,
             )
-            rows = self._build_listing_rows(session, force_refresh=force_refresh)
+            rows = self._build_listing_rows(session, force_refresh=force_refresh, limit=limit)
             filtered = self._apply_listing_filters(rows, filters)
             sorted_rows = self._sort_listing_rows(filtered, filters.sort_by, filters.sort_order, default_sort="profit")
             return LiveMarketListingListResponse(count=min(len(sorted_rows), limit), items=sorted_rows[:limit])
@@ -794,6 +796,7 @@ class ShowSyncService:
         return ShowRosterUpdateListResponse(count=len(items), items=items)
 
     def list_market_listings(self, session: Session, limit: int = 50) -> list[MarketListing]:
+        limit = max(1, min(limit, self.MARKET_LISTINGS_HARD_CAP))
         return session.scalars(
             select(MarketListing)
             .options(selectinload(MarketListing.card))
@@ -814,13 +817,14 @@ class ShowSyncService:
             .limit(limit)
         ).all()
 
-    def _build_listing_rows(self, session: Session, force_refresh: bool = False) -> list[LiveMarketListingResponse]:
+    def _build_listing_rows(self, session: Session, force_refresh: bool = False, limit: int = 50) -> list[LiveMarketListingResponse]:
+        limit = max(1, min(limit, self.MARKET_LISTINGS_HARD_CAP))
         if force_refresh:
             logger.info("Ignoring force_refresh request; market endpoints now serve cached data only")
-        rows = self.list_market_listings(session, limit=self.DEFAULT_SCAN_LIMIT)
+        rows = self.list_market_listings(session, limit=limit)
         if rows:
             return self._listing_rows_from_records(session, rows)
-        snapshot_rows = self._listing_rows_from_snapshots(session)
+        snapshot_rows = self._listing_rows_from_snapshots(session, limit=limit)
         if snapshot_rows:
             logger.info("Serving market endpoint response from cached snapshots because warm listing rows are unavailable")
             return snapshot_rows
@@ -830,22 +834,23 @@ class ShowSyncService:
     def _listing_rows_from_records(self, session: Session, rows: list[MarketListing]) -> list[LiveMarketListingResponse]:
         item_ids = [row.item_id for row in rows]
         stats = self._history_stats_for_items(session, item_ids)
-        aggregates = self.market_data_service.get_latest_aggregates(session)
+        aggregates = self.market_data_service.get_latest_aggregates(session, item_ids=item_ids)
         return [
             self._listing_row_from_record(row, stats.get(row.item_id, {}), aggregates.get(row.item_id))
             for row in rows
         ]
 
-    def _listing_rows_from_snapshots(self, session: Session) -> list[LiveMarketListingResponse]:
-        latest_snapshots = self.market_data_service.get_latest_snapshots(session)
+    def _listing_rows_from_snapshots(self, session: Session, limit: int = 50) -> list[LiveMarketListingResponse]:
+        latest_snapshots = self.market_data_service.get_latest_snapshots(session, limit=limit)
         if not latest_snapshots:
             return []
+        item_ids = list(latest_snapshots.keys())
         cards = {
             card.item_id: card
-            for card in session.scalars(select(Card).where(Card.item_id.in_(list(latest_snapshots.keys())))).all()
+            for card in session.scalars(select(Card).where(Card.item_id.in_(item_ids))).all()
         }
-        stats = self._history_stats_for_items(session, list(latest_snapshots.keys()))
-        aggregates = self.market_data_service.get_latest_aggregates(session)
+        stats = self._history_stats_for_items(session, item_ids)
+        aggregates = self.market_data_service.get_latest_aggregates(session, item_ids=item_ids)
         rows: list[LiveMarketListingResponse] = []
         for item_id, snapshot in latest_snapshots.items():
             card = cards.get(item_id)
