@@ -44,6 +44,16 @@ def listing_query_params(
     }
 
 
+@router.get("", response_model=LiveMarketListingListResponse)
+def market_root(
+    db: Session = Depends(get_db),
+    show_sync_service=Depends(get_show_sync_service),
+):
+    response = show_sync_service.get_market_listings_response(db, limit=25)
+    db.commit()
+    return response
+
+
 @router.get("/listings", response_model=LiveMarketListingListResponse)
 def market_listings(
     params=Depends(listing_query_params),
