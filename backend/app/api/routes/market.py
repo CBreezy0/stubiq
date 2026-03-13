@@ -15,7 +15,7 @@ from app.schemas.cards import CardSummaryResponse
 from app.schemas.market import MarketOpportunityListResponse, MarketOpportunityResponse
 from app.schemas.show_sync import LiveMarketListingListResponse, MarketMoverItem, MarketMoverListResponse, MarketMoversResponse, PriceHistoryResponse
 from app.security.deps import get_optional_user
-from app.services.redis_cache import build_cache_key, load_cached_response, store_cached_response
+from app.services.redis_cache import load_cached_response
 from app.utils.enums import MarketPhase, RecommendationAction
 
 router = APIRouter(prefix="/market", tags=["market"])
@@ -181,36 +181,13 @@ def market_history(
 @router.get("/movers", response_model=MarketMoversResponse)
 def market_movers(
     limit: int = Query(default=50, ge=1, le=50),
-    db: Session = Depends(get_db),
 ):
-    cache_key = build_cache_key("market/movers", {"limit": limit})
-    cached_response = load_cached_response(cache_key, MarketMoversResponse)
-    if cached_response is not None:
-        return cached_response
+    cached_response = load_cached_response("market:movers", MarketMoversResponse)
+    if cached_response is None:
+        return MarketMoversResponse(count=0, items=[])
 
-    rows = db.scalars(
-        select(MarketMoverCache)
-        .where(MarketMoverCache.change_percent.is_not(None))
-        .where(MarketMoverCache.current_price.is_not(None))
-        .where(MarketMoverCache.previous_price.is_not(None))
-        .order_by(MarketMoverCache.change_percent.desc(), MarketMoverCache.updated_at.desc())
-        .limit(limit)
-    ).all()
-    items = [
-        MarketMoverItem(
-            item_id=row.item_id,
-            name=row.name,
-            best_buy_price=None,
-            best_sell_price=row.current_price,
-            price_change=int(row.current_price - row.previous_price),
-            change_percent=float(row.change_percent),
-            liquidity_score=None,
-        )
-        for row in rows
-    ]
-    response = MarketMoversResponse(count=len(items), items=items)
-    store_cached_response(cache_key, response)
-    return response
+    items = list(cached_response.items)[:limit]
+    return MarketMoversResponse(count=len(items), items=items)
 
 
 @router.get("/trending", response_model=MarketMoverListResponse)
@@ -244,27 +221,13 @@ def market_strategy_flips(
 @router.get("/floors", response_model=MarketOpportunityListResponse)
 def market_floors(
     limit: int = Query(default=25, ge=1, le=100),
-    db: Session = Depends(get_db),
 ):
-    cache_key = build_cache_key("market/floors", {"limit": limit})
-    cached_response = load_cached_response(cache_key, MarketOpportunityListResponse)
-    if cached_response is not None:
-        return cached_response
+    cached_response = load_cached_response("market:floors", MarketOpportunityListResponse)
+    if cached_response is None:
+        return MarketOpportunityListResponse(phase=MarketPhase.STABILIZATION, count=0, items=[])
 
-    latest_snapshots = _latest_snapshot_subquery()
-    phase = _cached_market_phase(db)
-    rows = db.execute(
-        select(FloorOpportunity, Card, latest_snapshots)
-        .select_from(FloorOpportunity)
-        .outerjoin(Card, Card.item_id == FloorOpportunity.item_id)
-        .outerjoin(latest_snapshots, latest_snapshots.c.item_id == FloorOpportunity.item_id)
-        .order_by(FloorOpportunity.roi.desc().nullslast(), FloorOpportunity.updated_at.desc())
-        .limit(limit)
-    ).all()
-    items = [_cached_floor_response(row, card, snapshot_row, phase) for row, card, snapshot_row in rows]
-    response = MarketOpportunityListResponse(phase=phase, count=len(items), items=items)
-    store_cached_response(cache_key, response)
-    return response
+    items = list(cached_response.items)[:limit]
+    return MarketOpportunityListResponse(phase=cached_response.phase, count=len(items), items=items)
 
 
 @router.get("/phases")

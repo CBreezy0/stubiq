@@ -5,14 +5,12 @@ from __future__ import annotations
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_show_sync_service
 from app.api.routes.market import listing_query_params
 from app.database import get_db
-from app.models import Card, TopFlip
-from app.services.redis_cache import build_cache_key, load_cached_response, store_cached_response
+from app.services.redis_cache import load_cached_response
 from app.schemas.show_sync import LiveMarketListingListResponse, LiveMarketListingResponse
 
 router = APIRouter(prefix="/flips", tags=["flips"])
@@ -40,80 +38,56 @@ def top_flip_query_params(
     }
 
 
-def _top_flip_sort_column(sort_by: str):
-    if sort_by == "roi":
-        return TopFlip.roi
-    if sort_by in {"profit", "profit_after_tax"}:
-        return TopFlip.profit
-    return TopFlip.profit_per_min
+def _normalize_text(value: Optional[str]) -> str:
+    return value.strip().lower() if value else ""
 
 
-def _top_flip_row_to_response(row: TopFlip, card: Optional[Card]) -> LiveMarketListingResponse:
-    return LiveMarketListingResponse(
-        uuid=row.item_id,
-        name=row.name or (card.name if card else row.item_id),
-        best_buy_price=row.buy_price,
-        best_sell_price=row.sell_price,
-        spread=None,
-        profit_after_tax=row.profit,
-        roi=row.roi,
-        position=card.display_position if card else None,
-        series=card.series if card else None,
-        team=card.team if card else None,
-        overall=card.overall if card else None,
-        rarity=card.rarity if card else None,
-        order_volume=0,
-        liquidity_score=None,
-        profit_per_minute=row.profit_per_min,
-        flip_score=row.profit_per_min,
-        last_seen_at=row.updated_at,
-    )
+def _sort_top_flip_items(items: list[LiveMarketListingResponse], sort_by: str) -> list[LiveMarketListingResponse]:
+    field_name = "profit_after_tax" if sort_by in {"profit", "profit_after_tax"} else sort_by
+
+    def sort_value(item: LiveMarketListingResponse):
+        value = getattr(item, field_name, None)
+        return float("-inf") if value is None else value
+
+    return sorted(items, key=sort_value, reverse=True)
 
 
 @router.get("/top", response_model=LiveMarketListingListResponse)
 def top_flips(
     params=Depends(top_flip_query_params),
-    db: Session = Depends(get_db),
 ):
-    cache_key = build_cache_key("flips/top", params)
-    cached_response = load_cached_response(cache_key, LiveMarketListingListResponse)
-    if cached_response is not None:
-        return cached_response
+    cached_response = load_cached_response("flips:top", LiveMarketListingListResponse)
+    if cached_response is None:
+        return LiveMarketListingListResponse(count=0, items=[])
 
-    sort_column = _top_flip_sort_column(params["sort_by"])
-    query = (
-        select(TopFlip, Card)
-        .select_from(TopFlip)
-        .outerjoin(Card, Card.item_id == TopFlip.item_id)
-    )
+    items = list(cached_response.items)
 
     roi_min = params.get("roi_min")
     if roi_min is not None:
-        query = query.where(TopFlip.roi.is_not(None)).where(TopFlip.roi >= roi_min)
+        items = [item for item in items if item.roi is not None and item.roi >= roi_min]
 
     profit_min = params.get("profit_min")
     if profit_min is not None:
-        query = query.where(TopFlip.profit.is_not(None)).where(TopFlip.profit >= profit_min)
+        items = [item for item in items if item.profit_after_tax is not None and item.profit_after_tax >= profit_min]
 
-    rarity = params.get("rarity")
+    liquidity_min = params.get("liquidity_min")
+    if liquidity_min is not None:
+        items = [item for item in items if item.liquidity_score is not None and item.liquidity_score >= liquidity_min]
+
+    rarity = _normalize_text(params.get("rarity"))
     if rarity:
-        query = query.where(Card.rarity.is_not(None)).where(Card.rarity.ilike(rarity.strip()))
+        items = [item for item in items if _normalize_text(item.rarity) == rarity]
 
-    team = params.get("team")
+    team = _normalize_text(params.get("team"))
     if team:
-        query = query.where(Card.team.is_not(None)).where(Card.team.ilike(team.strip()))
+        items = [item for item in items if _normalize_text(item.team) == team]
 
-    series = params.get("series")
+    series = _normalize_text(params.get("series"))
     if series:
-        query = query.where(Card.series.is_not(None)).where(Card.series.ilike(series.strip()))
+        items = [item for item in items if _normalize_text(item.series) == series]
 
-    rows = db.execute(
-        query.order_by(sort_column.desc().nullslast(), TopFlip.updated_at.desc()).limit(params["limit"])
-    ).all()
-    items = [_top_flip_row_to_response(top_flip, card) for top_flip, card in rows]
-    response = LiveMarketListingListResponse(count=len(items), items=items)
-    store_cached_response(cache_key, response)
-    return response
+    items = _sort_top_flip_items(items, params["sort_by"])[: params["limit"]]
+    return LiveMarketListingListResponse(count=len(items), items=items)
 
 
 @router.get("", response_model=LiveMarketListingListResponse)
