@@ -142,6 +142,20 @@ def test_market_movers_endpoint(client, monkeypatch):
     assert target["change_percent"] > 0.10
 
 
+def test_market_phases_cache_miss_returns_empty_payload(client, monkeypatch, caplog):
+    from app.api.routes import market as market_routes
+
+    monkeypatch.setattr(market_routes, "load_cached_json", lambda cache_key: None)
+
+    response = client.get("/market/phases")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["current"]["phase"] == "STABILIZATION"
+    assert payload["history"] == []
+    assert "analytics cache miss for /market/phases; returning empty payload" in caplog.text
+
+
 def test_market_listings_service_caps_limit_before_loading(app, monkeypatch):
     service = app.state.show_sync_service
     captured = {}
@@ -170,6 +184,7 @@ def test_market_endpoint_limit_caps(client, app, monkeypatch):
         LiveMarketListingResponse,
         MarketMoverItem,
         MarketMoverListResponse,
+        MarketMoverResponse,
         MarketMoversResponse,
     )
     from app.utils.enums import MarketPhase, RecommendationAction
@@ -239,20 +254,30 @@ def test_market_endpoint_limit_caps(client, app, monkeypatch):
         if cache_key == "market:floors":
             items = [make_floor(index) for index in range(40)]
             return MarketOpportunityListResponse(phase=MarketPhase.STABILIZATION, count=len(items), items=items)
+        if cache_key == "market:trending":
+            items = [
+                MarketMoverResponse(
+                    uuid=f"trend-{index}",
+                    name=f"Trend {index}",
+                    current_price=2000 + index,
+                    previous_price=1500 + index,
+                    change_amount=500,
+                    change_pct=5.0 + index,
+                    trend_score=20.0 + index,
+                    last_seen_at=now,
+                )
+                for index in range(40)
+            ]
+            return MarketMoverListResponse(count=len(items), items=items)
         return None
 
     def fake_market_listings_response(db, **params):
         captured_limits["market_listings"] = params["limit"]
         return LiveMarketListingListResponse(count=0, items=[])
 
-    def fake_trending_response(db, limit):
-        captured_limits["market_trending"] = limit
-        return MarketMoverListResponse(count=0, items=[])
-
     monkeypatch.setattr(flips_routes, "load_cached_response", fake_flips_cache)
     monkeypatch.setattr(market_routes, "load_cached_response", fake_market_cache)
     monkeypatch.setattr(app.state.show_sync_service, "get_market_listings_response", fake_market_listings_response)
-    monkeypatch.setattr(app.state.show_sync_service, "get_trending_response", fake_trending_response)
 
     listings_response = client.get("/market/listings", params={"limit": 200})
     top_flips_response = client.get("/flips/top", params={"limit": 50})
@@ -267,10 +292,10 @@ def test_market_endpoint_limit_caps(client, app, monkeypatch):
     assert trending_response.status_code == 200
 
     assert captured_limits["market_listings"] == 50
-    assert captured_limits["market_trending"] == 25
     assert top_flips_response.json()["count"] == 25
     assert movers_response.json()["count"] == 25
     assert floors_response.json()["count"] == 25
+    assert trending_response.json()["count"] == 25
 
 
 def test_card_price_history_endpoint(client, app):

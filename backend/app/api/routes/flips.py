@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -17,6 +19,8 @@ router = APIRouter(prefix="/flips", tags=["flips"])
 
 TOP_FLIPS_HARD_CAP = 25
 CACHE_CONTROL_HEADER = "public, max-age=60"
+
+logger = logging.getLogger(__name__)
 
 
 def top_flip_query_params(
@@ -54,6 +58,10 @@ def _merge_cache_control(response: Response) -> None:
         response.headers["Cache-Control"] = f"{existing}, {CACHE_CONTROL_HEADER}"
 
 
+def _log_cache_miss(path: str) -> None:
+    logger.warning("analytics cache miss for %s; returning empty payload", path)
+
+
 def _sort_top_flip_items(items: list[LiveMarketListingResponse], sort_by: str) -> list[LiveMarketListingResponse]:
     field_name = "profit_after_tax" if sort_by in {"profit", "profit_after_tax"} else sort_by
 
@@ -72,6 +80,7 @@ def top_flips(
     _merge_cache_control(response)
     cached_response = load_cached_response("flips:top", LiveMarketListingListResponse)
     if cached_response is None:
+        _log_cache_miss("/flips/top")
         return LiveMarketListingListResponse(count=0, items=[])
 
     items = list(cached_response.items)

@@ -70,6 +70,24 @@ def load_cached_response(cache_key: str, model_type: type[ModelT]) -> ModelT | N
         return None
 
 
+def load_cached_json(cache_key: str) -> Any | None:
+    client = get_redis_client()
+    if client is None:
+        return None
+    try:
+        payload = client.get(cache_key)
+    except RedisError as exc:
+        logger.warning("Redis cache read failed for %s: %s", cache_key, exc)
+        return None
+    if not payload:
+        return None
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError as exc:
+        logger.warning("Redis cache JSON decode failed for %s: %s", cache_key, exc)
+        return None
+
+
 def store_cached_response(cache_key: str, response: BaseModel) -> None:
     client = get_redis_client()
     if client is None:

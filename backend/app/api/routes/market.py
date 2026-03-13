@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -12,11 +14,13 @@ from app.api.deps import get_recommendation_service, get_show_sync_service
 from app.database import get_db
 from app.models import Card, FloorOpportunity, ListingsSnapshot, MarketMoverCache, MarketPhaseCache
 from app.schemas.cards import CardSummaryResponse
+from app.schemas.common import MarketPhaseResponse
 from app.schemas.market import MarketOpportunityListResponse, MarketOpportunityResponse
 from app.schemas.show_sync import LiveMarketListingListResponse, MarketMoverItem, MarketMoverListResponse, MarketMoversResponse, PriceHistoryResponse
 from app.security.deps import get_optional_user
-from app.services.redis_cache import load_cached_response
+from app.services.redis_cache import load_cached_json, load_cached_response
 from app.utils.enums import MarketPhase, RecommendationAction
+from app.utils.time import utcnow
 
 router = APIRouter(prefix="/market", tags=["market"])
 
@@ -25,6 +29,8 @@ MARKET_MOVERS_HARD_CAP = 25
 MARKET_FLOORS_HARD_CAP = 25
 MARKET_TRENDING_HARD_CAP = 25
 CACHE_CONTROL_HEADER = "public, max-age=60"
+
+logger = logging.getLogger(__name__)
 
 
 def _latest_snapshot_subquery():
@@ -71,6 +77,10 @@ def _merge_cache_control(response: Response) -> None:
         return
     if CACHE_CONTROL_HEADER not in existing:
         response.headers["Cache-Control"] = f"{existing}, {CACHE_CONTROL_HEADER}"
+
+
+def _log_cache_miss(path: str) -> None:
+    logger.warning("analytics cache miss for %s; returning empty payload", path)
 
 
 def _cached_floor_action(row: FloorOpportunity) -> RecommendationAction:
@@ -203,6 +213,7 @@ def market_movers(
     limit = min(limit, MARKET_MOVERS_HARD_CAP)
     cached_response = load_cached_response("market:movers", MarketMoversResponse)
     if cached_response is None:
+        _log_cache_miss("/market/movers")
         return MarketMoversResponse(count=0, items=[])
 
     items = list(cached_response.items)[:limit]
@@ -213,12 +224,16 @@ def market_movers(
 def market_trending(
     response: Response,
     limit: int = Query(default=25, ge=1, le=100),
-    db: Session = Depends(get_db),
-    show_sync_service=Depends(get_show_sync_service),
 ):
     _merge_cache_control(response)
     limit = min(limit, MARKET_TRENDING_HARD_CAP)
-    return show_sync_service.get_trending_response(db, limit=limit)
+    cached_response = load_cached_response("market:trending", MarketMoverListResponse)
+    if cached_response is None:
+        _log_cache_miss("/market/trending")
+        return MarketMoverListResponse(count=0, items=[])
+
+    items = list(cached_response.items)[:limit]
+    return MarketMoverListResponse(count=len(items), items=items)
 
 
 @router.get("/biggest-movers", response_model=MarketMoverListResponse)
@@ -249,6 +264,7 @@ def market_floors(
     limit = min(limit, MARKET_FLOORS_HARD_CAP)
     cached_response = load_cached_response("market:floors", MarketOpportunityListResponse)
     if cached_response is None:
+        _log_cache_miss("/market/floors")
         return MarketOpportunityListResponse(phase=MarketPhase.STABILIZATION, count=0, items=[])
 
     items = list(cached_response.items)[:limit]
@@ -258,12 +274,20 @@ def market_floors(
 @router.get("/phases")
 def market_phases(
     response: Response,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_optional_user),
-    recommendation_service=Depends(get_recommendation_service),
 ):
     _merge_cache_control(response)
+    cached_payload = load_cached_json("market:phases")
+    if cached_payload is not None:
+        return cached_payload
+
+    _log_cache_miss("/market/phases")
     return {
-        "current": recommendation_service.get_phase(db, user=current_user),
-        "history": recommendation_service.get_phase_history(db),
+        "current": MarketPhaseResponse(
+            phase=MarketPhase.STABILIZATION,
+            confidence=0.0,
+            rationale="Analytics cache is cold; returning empty market phase payload.",
+            override_active=False,
+            detected_at=utcnow(),
+        ),
+        "history": [],
     }
