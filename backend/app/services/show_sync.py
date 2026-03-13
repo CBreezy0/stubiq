@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -67,6 +68,8 @@ class ShowSyncService:
     """Validates MLB 26 payloads and persists reusable market-supporting data."""
 
     DEFAULT_SCAN_LIMIT = 2000
+    BATCH_SIZE = 50
+    BATCH_PAUSE_SECONDS = 0.2
 
     def __init__(self, settings: Settings, adapter: ShowApiAdapter, market_data_service: MarketDataService):
         self.settings = settings
@@ -89,46 +92,69 @@ class ShowSyncService:
         }
 
     def sync_listings(self, session: Session, item_type: str = "mlb_card", page_limit: Optional[int] = None) -> dict[str, int]:
-        pages = self.adapter.fetch_listings_pages(item_type=item_type, page_limit=page_limit)
         synced = 0
+        pages_processed = 0
+        batch_number = 0
+        batch_items = 0
         observed_at = utcnow()
 
-        for page_payload in pages:
+        for page_payload in self.adapter.fetch_listings_pages(item_type=item_type, page_limit=page_limit):
             page = ShowListingsPagePayload.model_validate(page_payload)
+            pages_processed += 1
             for listing in page.listings:
-                item_payload = listing.item.model_dump(mode="json")
-                self.market_data_service.upsert_card_from_item(session, item_payload)
-                self.market_data_service.record_listing_snapshot(session, listing.model_dump(mode="json"), observed_at=observed_at)
-
-                best_buy = safe_int(listing.best_buy_price)
-                best_sell = safe_int(listing.best_sell_price)
-                metrics = self.compute_listing_metrics(best_buy, best_sell)
-                item_id = listing.item.uuid
-                record = session.scalar(select(MarketListing).where(MarketListing.item_id == item_id))
-                if record is None:
-                    record = MarketListing(item_id=item_id)
-                record.listing_name = listing.listing_name or listing.item.name
-                record.best_buy_price = best_buy
-                record.best_sell_price = best_sell
-                record.spread = metrics["spread"]
-                record.estimated_profit = metrics["estimated_profit"]
-                record.roi_percent = metrics["roi_percent"]
-                record.source_page = page.page
-                record.payload_json = listing.model_dump(mode="json")
-                record.last_seen_at = observed_at
-                session.add(record)
-                session.add(
-                    PriceHistory(
-                        uuid=item_id,
-                        buy_price=best_buy,
-                        sell_price=best_sell,
-                        timestamp=observed_at,
-                    )
-                )
+                self._persist_listing(session, listing=listing, source_page=page.page, observed_at=observed_at)
                 synced += 1
+                batch_items += 1
 
+                if batch_items >= self.BATCH_SIZE:
+                    batch_number += 1
+                    self._complete_listing_batch(session, batch_number=batch_number, sleep_between_batches=True)
+                    batch_items = 0
+
+        if batch_items:
+            batch_number += 1
+            self._complete_listing_batch(session, batch_number=batch_number, sleep_between_batches=False)
+
+        return {"pages": pages_processed, "listings": synced}
+
+    def _persist_listing(self, session: Session, listing: Any, source_page: Optional[int], observed_at: datetime) -> None:
+        item_payload = listing.item.model_dump(mode="json")
+        self.market_data_service.upsert_card_from_item(session, item_payload)
+        self.market_data_service.record_listing_snapshot(session, listing.model_dump(mode="json"), observed_at=observed_at)
+
+        best_buy = safe_int(listing.best_buy_price)
+        best_sell = safe_int(listing.best_sell_price)
+        metrics = self.compute_listing_metrics(best_buy, best_sell)
+        item_id = listing.item.uuid
+        record = session.scalar(select(MarketListing).where(MarketListing.item_id == item_id))
+        if record is None:
+            record = MarketListing(item_id=item_id)
+        record.listing_name = listing.listing_name or listing.item.name
+        record.best_buy_price = best_buy
+        record.best_sell_price = best_sell
+        record.spread = metrics["spread"]
+        record.estimated_profit = metrics["estimated_profit"]
+        record.roi_percent = metrics["roi_percent"]
+        record.source_page = source_page
+        record.payload_json = listing.model_dump(mode="json")
+        record.last_seen_at = observed_at
+        session.add(record)
+        session.add(
+            PriceHistory(
+                uuid=item_id,
+                buy_price=best_buy,
+                sell_price=best_sell,
+                timestamp=observed_at,
+            )
+        )
         session.flush()
-        return {"pages": len(pages), "listings": synced}
+
+    def _complete_listing_batch(self, session: Session, batch_number: int, sleep_between_batches: bool) -> None:
+        logger.info("Processing batch %s", batch_number)
+        session.flush()
+        session.expunge_all()
+        if sleep_between_batches:
+            time.sleep(self.BATCH_PAUSE_SECONDS)
 
     def sync_metadata(self, session: Session) -> ShowMetadataSnapshot:
         payload = ShowMetadataPayload.model_validate(self.adapter.fetch_metadata())
