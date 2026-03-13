@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import logging
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -56,6 +58,9 @@ from app.strategies import (
 from app.utils.enums import MarketPhase, RecommendationAction, RecommendationType, UpdateType
 from app.utils.scoring import clamp, pct_change
 from app.utils.time import utcnow
+
+
+logger = logging.getLogger(__name__)
 
 
 class RecommendationService:
@@ -421,36 +426,40 @@ class RecommendationService:
         )
 
     def get_card_detail(self, session: Session, item_id: str, user: Optional[User] = None) -> Optional[CardDetailResponse]:
-        context = self.market_data_service.get_card_context(session, item_id)
-        if context is None:
-            return None
-        recommendations = [
-            RecommendationView(
-                recommendation_type=row.recommendation_type,
-                action=row.action,
-                confidence=row.confidence,
-                expected_profit=row.expected_profit,
-                expected_value=row.expected_value,
-                market_phase=MarketPhase((row.rationale_json or {}).get("market_phase", self.get_phase(session, user).phase.value)),
-                rationale=(row.rationale_json or {}).get("rationale", "Persisted strategy recommendation"),
-                rationale_json=row.rationale_json or {},
+        try:
+            context = self.market_data_service.get_card_context(session, item_id)
+            if context is None:
+                return None
+            recommendations = [
+                RecommendationView(
+                    recommendation_type=row.recommendation_type,
+                    action=row.action,
+                    confidence=row.confidence,
+                    expected_profit=row.expected_profit,
+                    expected_value=row.expected_value,
+                    market_phase=MarketPhase((row.rationale_json or {}).get("market_phase", self.get_phase(session, user).phase.value)),
+                    rationale=(row.rationale_json or {}).get("rationale", "Persisted strategy recommendation"),
+                    rationale_json=row.rationale_json or {},
+                )
+                for row in self.market_data_service.get_recent_recommendations(session, item_id)
+            ]
+            summary = self._build_card_summary(context.card, context.snapshot)
+            aggregate = context.aggregate
+            return CardDetailResponse(
+                **summary.model_dump(),
+                metadata_json=context.card.metadata_json or {},
+                aggregate_phase=aggregate.phase.value if aggregate else None,
+                avg_price_15m=aggregate.avg_price_15m if aggregate else None,
+                avg_price_1h=aggregate.avg_price_1h if aggregate else None,
+                avg_price_6h=aggregate.avg_price_6h if aggregate else None,
+                avg_price_24h=aggregate.avg_price_24h if aggregate else None,
+                volatility_score=aggregate.volatility_score if aggregate else None,
+                liquidity_score=aggregate.liquidity_score if aggregate else None,
+                recommendations=recommendations,
             )
-            for row in self.market_data_service.get_recent_recommendations(session, item_id)
-        ]
-        summary = self._build_card_summary(context.card, context.snapshot)
-        aggregate = context.aggregate
-        return CardDetailResponse(
-            **summary.model_dump(),
-            metadata_json=context.card.metadata_json or {},
-            aggregate_phase=aggregate.phase.value if aggregate else None,
-            avg_price_15m=aggregate.avg_price_15m if aggregate else None,
-            avg_price_1h=aggregate.avg_price_1h if aggregate else None,
-            avg_price_6h=aggregate.avg_price_6h if aggregate else None,
-            avg_price_24h=aggregate.avg_price_24h if aggregate else None,
-            volatility_score=aggregate.volatility_score if aggregate else None,
-            liquidity_score=aggregate.liquidity_score if aggregate else None,
-            recommendations=recommendations,
-        )
+        except SQLAlchemyError:
+            logger.exception("Database query failed while building card detail response for item_id=%s", item_id)
+            raise
 
     def generate_and_store_recommendations(self, session: Session) -> Dict[str, int]:
         phase = self.get_phase(session)

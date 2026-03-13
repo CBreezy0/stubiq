@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -10,6 +11,7 @@ import json
 from typing import Any, Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import Settings
@@ -35,6 +37,9 @@ from app.services.market_data import MarketDataService
 from app.services.show_api import ShowApiAdapter
 from app.utils.scoring import clamp, safe_int, tax_adjusted_profit
 from app.utils.time import utcnow
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -191,22 +196,31 @@ class ShowSyncService:
         limit: int = 50,
         force_refresh: bool = False,
     ) -> LiveMarketListingListResponse:
-        filters = MarketQueryFilters(
-            min_roi=min_roi,
-            min_profit=min_profit,
-            max_buy_price=max_buy_price,
-            rarity=rarity,
-            series=series,
-            team=team,
-            position=position,
-            sort_by=sort_by,
-            sort_order=sort_order,
-            limit=limit,
-        )
-        rows = self._build_listing_rows(session, force_refresh=force_refresh)
-        filtered = self._apply_listing_filters(rows, filters)
-        sorted_rows = self._sort_listing_rows(filtered, filters.sort_by, filters.sort_order, default_sort="profit")
-        return LiveMarketListingListResponse(count=min(len(sorted_rows), limit), items=sorted_rows[:limit])
+        try:
+            filters = MarketQueryFilters(
+                min_roi=min_roi,
+                min_profit=min_profit,
+                max_buy_price=max_buy_price,
+                rarity=rarity,
+                series=series,
+                team=team,
+                position=position,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                limit=limit,
+            )
+            rows = self._build_listing_rows(session, force_refresh=force_refresh)
+            filtered = self._apply_listing_filters(rows, filters)
+            sorted_rows = self._sort_listing_rows(filtered, filters.sort_by, filters.sort_order, default_sort="profit")
+            return LiveMarketListingListResponse(count=min(len(sorted_rows), limit), items=sorted_rows[:limit])
+        except SQLAlchemyError:
+            logger.exception(
+                "Database query failed while building market listings response (limit=%s, sort_by=%s, sort_order=%s)",
+                limit,
+                sort_by,
+                sort_order,
+            )
+            raise
 
     def get_flip_listings_response(
         self,
@@ -224,26 +238,35 @@ class ShowSyncService:
         limit: int = 25,
         force_refresh: bool = False,
     ) -> LiveMarketListingListResponse:
-        filters = MarketQueryFilters(
-            min_roi=min_roi,
-            min_profit=min_profit,
-            max_buy_price=max_buy_price,
-            rarity=rarity,
-            series=series,
-            team=team,
-            position=position,
-            sort_by=sort_by,
-            sort_order=sort_order,
-            limit=limit,
-        )
-        rows = [
-            row
-            for row in self._build_listing_rows(session, force_refresh=force_refresh)
-            if (row.profit_after_tax or 0) > 0 and (row.roi or 0.0) > 0
-        ]
-        filtered = self._apply_listing_filters(rows, filters)
-        sorted_rows = self._sort_listing_rows(filtered, filters.sort_by, filters.sort_order, default_sort="flip_score")
-        return LiveMarketListingListResponse(count=min(len(sorted_rows), limit), items=sorted_rows[:limit])
+        try:
+            filters = MarketQueryFilters(
+                min_roi=min_roi,
+                min_profit=min_profit,
+                max_buy_price=max_buy_price,
+                rarity=rarity,
+                series=series,
+                team=team,
+                position=position,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                limit=limit,
+            )
+            rows = [
+                row
+                for row in self._build_listing_rows(session, force_refresh=force_refresh)
+                if (row.profit_after_tax or 0) > 0 and (row.roi or 0.0) > 0
+            ]
+            filtered = self._apply_listing_filters(rows, filters)
+            sorted_rows = self._sort_listing_rows(filtered, filters.sort_by, filters.sort_order, default_sort="flip_score")
+            return LiveMarketListingListResponse(count=min(len(sorted_rows), limit), items=sorted_rows[:limit])
+        except SQLAlchemyError:
+            logger.exception(
+                "Database query failed while building flip listings response (limit=%s, sort_by=%s, sort_order=%s)",
+                limit,
+                sort_by,
+                sort_order,
+            )
+            raise
 
     def get_market_history_response(self, session: Session, uuid: str, days: int = 1) -> PriceHistoryResponse:
         points = self._history_points_for_item(session, uuid, days)
