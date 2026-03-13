@@ -2,13 +2,16 @@
 
 import type { MarketListingsQuery, MarketSortField, SortOrder } from '@/lib/types';
 
+export type MarketScannerSortField = MarketSortField | 'profit_after_tax' | 'profit_per_minute' | 'flip_score' | 'roi';
+
 export interface MarketFilterState {
   rarity: string;
   series: string;
   team: string;
   minProfit: string;
   minRoi: string;
-  sortBy: MarketSortField;
+  minLiquidity?: string;
+  sortBy: MarketScannerSortField;
   sortOrder: SortOrder;
 }
 
@@ -19,8 +22,9 @@ interface MarketFiltersBarProps {
   onChange: (next: MarketFilterState) => void;
   onApply: () => void;
   onReset: () => void;
-  sortOptions: Array<{ value: MarketSortField; label: string }>;
+  sortOptions: Array<{ value: MarketScannerSortField; label: string }>;
   isApplying?: boolean;
+  showSortOrder?: boolean;
 }
 
 const rarityOptions = ['Any', 'Common', 'Bronze', 'Silver', 'Gold', 'Diamond'];
@@ -32,7 +36,7 @@ export function buildMarketQueryFromFilters(filters: MarketFilterState, limit = 
     team: filters.team || undefined,
     min_profit: filters.minProfit ? Number(filters.minProfit) : undefined,
     min_roi: filters.minRoi ? Number(filters.minRoi) : undefined,
-    sort_by: filters.sortBy,
+    sort_by: filters.sortBy as MarketSortField,
     sort_order: filters.sortOrder,
     limit,
   };
@@ -47,6 +51,7 @@ export function MarketFiltersBar({
   onReset,
   sortOptions,
   isApplying = false,
+  showSortOrder = true,
 }: MarketFiltersBarProps) {
   return (
     <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg">
@@ -116,10 +121,23 @@ export function MarketFiltersBar({
         </label>
 
         <label className="block text-sm text-slate-300">
+          <span className="mb-2 block">Min liquidity</span>
+          <input
+            type="number"
+            min={0}
+            step="0.1"
+            value={value.minLiquidity ?? ''}
+            onChange={(event) => onChange({ ...value, minLiquidity: event.target.value })}
+            placeholder="50"
+            className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-sky-400"
+          />
+        </label>
+
+        <label className="block text-sm text-slate-300">
           <span className="mb-2 block">Sort by</span>
           <select
             value={value.sortBy}
-            onChange={(event) => onChange({ ...value, sortBy: event.target.value as MarketSortField })}
+            onChange={(event) => onChange({ ...value, sortBy: event.target.value as MarketScannerSortField })}
             className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-sky-400"
           >
             {sortOptions.map((option) => (
@@ -130,17 +148,19 @@ export function MarketFiltersBar({
           </select>
         </label>
 
-        <label className="block text-sm text-slate-300">
-          <span className="mb-2 block">Order</span>
-          <select
-            value={value.sortOrder}
-            onChange={(event) => onChange({ ...value, sortOrder: event.target.value as SortOrder })}
-            className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-sky-400"
-          >
-            <option value="desc">High to low</option>
-            <option value="asc">Low to high</option>
-          </select>
-        </label>
+        {showSortOrder ? (
+          <label className="block text-sm text-slate-300">
+            <span className="mb-2 block">Order</span>
+            <select
+              value={value.sortOrder}
+              onChange={(event) => onChange({ ...value, sortOrder: event.target.value as SortOrder })}
+              className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition focus:border-sky-400"
+            >
+              <option value="desc">High to low</option>
+              <option value="asc">Low to high</option>
+            </select>
+          </label>
+        ) : null}
       </div>
 
       <div className="mt-5 flex flex-wrap gap-3">
