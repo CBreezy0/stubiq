@@ -1,7 +1,5 @@
 'use client';
 
-import useSWR from 'swr';
-
 import { CollectionPriorityCard } from '@/components/CollectionPriorityCard';
 import { EmptyState } from '@/components/EmptyState';
 import { FlipTable } from '@/components/FlipTable';
@@ -14,52 +12,8 @@ import { MetricCard } from '@/components/MetricCard';
 import { RecommendationFeed } from '@/components/RecommendationFeed';
 import { RequireAuth } from '@/components/RequireAuth';
 import { RosterTargetsTable } from '@/components/RosterTargetsTable';
-import { ACCESS_TOKEN_STORAGE_KEY, API_BASE_URL } from '@/lib/api';
 import { useDashboard } from '@/hooks/useDashboard';
 import { formatSignedStubs, formatStubs, marketPhaseLabels } from '@/lib/utils';
-
-type DashboardMarketMover = {
-  item_id: string;
-  name: string;
-  best_buy_price?: number | null;
-  best_sell_price?: number | null;
-  price_change: number;
-  change_percent: number;
-  liquidity_score?: number | null;
-};
-
-type DashboardMarketMoversResponse = {
-  count: number;
-  items: DashboardMarketMover[];
-};
-
-async function getDashboardMarketMovers(): Promise<DashboardMarketMoversResponse> {
-  const headers = new Headers({ Accept: 'application/json' });
-  const accessToken = typeof window === 'undefined' ? null : window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
-
-  if (accessToken) {
-    headers.set('Authorization', `Bearer ${accessToken}`);
-  }
-
-  const response = await fetch(`${API_BASE_URL}/market/movers?limit=10`, {
-    headers,
-    cache: 'no-store',
-  });
-
-  if (!response.ok) {
-    let message = `Request failed with status ${response.status}`;
-    try {
-      const payload = (await response.json()) as { detail?: string };
-      if (payload.detail) message = payload.detail;
-    } catch {
-      const text = await response.text();
-      if (text) message = text;
-    }
-    throw new Error(message);
-  }
-
-  return response.json() as Promise<DashboardMarketMoversResponse>;
-}
 
 function DashboardContent() {
   const {
@@ -72,9 +26,8 @@ function DashboardContent() {
     grindRecommendation,
     inventory,
     trending,
+    marketMovers,
   } = useDashboard();
-
-  const marketMovers = useSWR('market-movers-dashboard', getDashboardMarketMovers, { refreshInterval: 60_000 });
 
   if (phase.isLoading && !phase.data) {
     return <LoadingState label="Loading dashboard..." />;

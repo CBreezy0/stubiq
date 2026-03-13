@@ -5,6 +5,20 @@ import useSWR from 'swr';
 import { ACCESS_TOKEN_STORAGE_KEY, API_BASE_URL, api } from '@/lib/api';
 
 type FlipListingsResponse = Awaited<ReturnType<(typeof api)['getFlips']>>;
+type DashboardMarketMover = {
+  item_id: string;
+  name: string;
+  best_buy_price?: number | null;
+  best_sell_price?: number | null;
+  price_change: number;
+  change_percent: number;
+  liquidity_score?: number | null;
+};
+
+type DashboardMarketMoversResponse = {
+  count: number;
+  items: DashboardMarketMover[];
+};
 
 async function getTopFlipsDashboard(): Promise<FlipListingsResponse> {
   const headers = new Headers({ Accept: 'application/json' });
@@ -34,6 +48,34 @@ async function getTopFlipsDashboard(): Promise<FlipListingsResponse> {
   return response.json() as Promise<FlipListingsResponse>;
 }
 
+async function getDashboardMarketMovers(): Promise<DashboardMarketMoversResponse> {
+  const headers = new Headers({ Accept: 'application/json' });
+  const accessToken = typeof window === 'undefined' ? null : window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/market/movers?limit=10`, {
+    headers,
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    let message = `Request failed with status ${response.status}`;
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (payload.detail) message = payload.detail;
+    } catch {
+      const text = await response.text();
+      if (text) message = text;
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<DashboardMarketMoversResponse>;
+}
+
 export function useDashboard() {
   const phase = useSWR('market-phases', () => api.getMarketPhases(), { refreshInterval: 60_000 });
   const topFlips = useSWR('market-top-flips-dashboard', getTopFlipsDashboard, {
@@ -49,7 +91,7 @@ export function useDashboard() {
   const portfolio = useSWR('portfolio', () => api.getPortfolio(), { refreshInterval: 60_000 });
   const inventory = useSWR('inventory-dashboard', () => api.getInventory(), { refreshInterval: 60_000 });
   const trending = useSWR('market-trending-dashboard', () => api.getTrending(5), { refreshInterval: 60_000 });
-  const biggestMovers = useSWR('market-biggest-movers-dashboard', () => api.getBiggestMovers(5), { refreshInterval: 60_000 });
+  const marketMovers = useSWR('market-movers-dashboard', getDashboardMarketMovers, { refreshInterval: 60_000 });
 
   return {
     phase,
@@ -62,6 +104,6 @@ export function useDashboard() {
     portfolio,
     inventory,
     trending,
-    biggestMovers,
+    marketMovers,
   };
 }
