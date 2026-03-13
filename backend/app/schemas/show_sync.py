@@ -133,6 +133,7 @@ class LiveMarketListingResponse(BaseModel):
     rarity: Optional[str] = None
     order_volume: int = 0
     liquidity_score: Optional[float] = None
+    profit_per_minute: Optional[float] = None
     flip_score: Optional[float] = None
     last_seen_at: datetime
 

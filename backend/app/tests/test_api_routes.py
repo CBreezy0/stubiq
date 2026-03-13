@@ -57,12 +57,30 @@ def test_dashboard_summary_route(client):
 def test_market_endpoints(client):
     listings = client.get("/market/listings")
     flips = client.get("/market/flips")
-    top_flips = client.get("/flips/top")
+    top_flips = client.get(
+        "/flips/top",
+        params={
+            "roi_min": 1,
+            "profit_min": 100,
+            "liquidity_min": 50,
+            "sort_by": "profit_per_minute",
+        },
+    )
+    filtered_top_flips = client.get(
+        "/flips/top",
+        params={
+            "rarity": "Diamond",
+            "team": "Dodgers",
+            "series": "Live",
+            "sort_by": "roi",
+        },
+    )
     strategy_flips = client.get("/market/strategy-flips")
     floors = client.get("/market/floors")
     assert listings.status_code == 200
     assert flips.status_code == 200
     assert top_flips.status_code == 200
+    assert filtered_top_flips.status_code == 200
     assert strategy_flips.status_code == 200
     assert floors.status_code == 200
     assert listings.json()["items"]
@@ -70,9 +88,19 @@ def test_market_endpoints(client):
     if top_flips.json()["items"]:
         top_items = top_flips.json()["items"]
         assert len(top_items) <= 50
-        assert {"liquidity_score", "flip_score", "roi"}.issubset(top_items[0])
-        scores = [item["flip_score"] for item in top_items]
+        assert {"liquidity_score", "flip_score", "roi", "profit_per_minute"}.issubset(top_items[0])
+        assert all((item["roi"] or 0) >= 1 for item in top_items)
+        assert all((item["profit_after_tax"] or 0) >= 100 for item in top_items)
+        assert all((item["liquidity_score"] or 0) >= 50 for item in top_items)
+        scores = [item["profit_per_minute"] for item in top_items]
         assert scores == sorted(scores, reverse=True)
+    if filtered_top_flips.json()["items"]:
+        filtered_items = filtered_top_flips.json()["items"]
+        assert all(item["rarity"] == "Diamond" for item in filtered_items)
+        assert all(item["team"] == "Dodgers" for item in filtered_items)
+        assert all(item["series"] == "Live" for item in filtered_items)
+        roi_scores = [item["roi"] for item in filtered_items]
+        assert roi_scores == sorted(roi_scores, reverse=True)
 
 
 

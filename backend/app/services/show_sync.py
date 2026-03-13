@@ -47,6 +47,7 @@ class MarketQueryFilters:
     min_roi: Optional[float] = None
     min_profit: Optional[int] = None
     max_buy_price: Optional[int] = None
+    min_liquidity: Optional[float] = None
     rarity: Optional[str] = None
     series: Optional[str] = None
     team: Optional[str] = None
@@ -268,9 +269,32 @@ class ShowSyncService:
             )
             raise
 
-    def get_top_flip_listings_response(self, session: Session, force_refresh: bool = False) -> LiveMarketListingListResponse:
+    def get_top_flip_listings_response(
+        self,
+        session: Session,
+        *,
+        roi_min: Optional[float] = None,
+        profit_min: Optional[int] = None,
+        liquidity_min: Optional[float] = None,
+        rarity: Optional[str] = None,
+        team: Optional[str] = None,
+        series: Optional[str] = None,
+        sort_by: str = "flip_score",
+        force_refresh: bool = False,
+    ) -> LiveMarketListingListResponse:
         limit = 50
         try:
+            filters = MarketQueryFilters(
+                min_roi=roi_min,
+                min_profit=profit_min,
+                min_liquidity=liquidity_min,
+                rarity=rarity,
+                series=series,
+                team=team,
+                sort_by=sort_by,
+                sort_order="desc",
+                limit=limit,
+            )
             rows = [
                 row.model_copy(
                     update={
@@ -280,13 +304,17 @@ class ShowSyncService:
                 for row in self._build_listing_rows(session, force_refresh=force_refresh)
                 if (row.profit_after_tax or 0) > 0 and (row.roi or 0.0) > 0 and (row.liquidity_score or 0.0) > 0
             ]
-            rows.sort(
-                key=lambda row: ((row.flip_score or 0.0), (row.roi or 0.0), (row.liquidity_score or 0.0)),
-                reverse=True,
-            )
-            return LiveMarketListingListResponse(count=min(len(rows), limit), items=rows[:limit])
+            filtered = self._apply_listing_filters(rows, filters)
+            sorted_rows = self._sort_listing_rows(filtered, filters.sort_by, filters.sort_order, default_sort="flip_score")
+            return LiveMarketListingListResponse(count=min(len(sorted_rows), limit), items=sorted_rows[:limit])
         except SQLAlchemyError:
-            logger.exception("Database query failed while building top flip listings response")
+            logger.exception(
+                "Database query failed while building top flip listings response (sort_by=%s, rarity=%s, team=%s, series=%s)",
+                sort_by,
+                rarity,
+                team,
+                series,
+            )
             raise
 
     def get_market_history_response(self, session: Session, uuid: str, days: int = 1) -> PriceHistoryResponse:
@@ -414,6 +442,8 @@ class ShowSyncService:
                 continue
             if filters.max_buy_price is not None and (row.best_buy_price or 0) > filters.max_buy_price:
                 continue
+            if filters.min_liquidity is not None and (row.liquidity_score or 0.0) < filters.min_liquidity:
+                continue
             if filters.rarity and not self._match_text(row.rarity, filters.rarity):
                 continue
             if filters.series and not self._match_text(row.series, filters.series):
@@ -443,6 +473,7 @@ class ShowSyncService:
                 "sell_price": row.best_sell_price or 0,
                 "spread": row.spread or 0,
                 "profit": row.profit_after_tax or 0,
+                "profit_per_minute": row.profit_per_minute or 0.0,
                 "roi": row.roi or 0.0,
                 "flip_score": row.flip_score or 0.0,
                 "order_volume": row.order_volume,
@@ -582,6 +613,7 @@ class ShowSyncService:
             rarity=card.rarity if card else None,
             order_volume=order_volume,
             liquidity_score=aggregate.liquidity_score if aggregate else None,
+            profit_per_minute=self._profit_per_minute(record.estimated_profit, order_volume),
             flip_score=flip_score,
             last_seen_at=record.last_seen_at,
         )
@@ -614,6 +646,7 @@ class ShowSyncService:
             rarity=card.rarity if card else None,
             order_volume=order_volume,
             liquidity_score=aggregate.liquidity_score if aggregate else None,
+            profit_per_minute=self._profit_per_minute(profit, order_volume),
             flip_score=self._flip_score(profit=profit, roi=roi, spread=spread, order_volume=order_volume),
             last_seen_at=snapshot.observed_at,
         )
@@ -635,13 +668,19 @@ class ShowSyncService:
     def _ranked_flip_score(self, roi: Optional[float], liquidity_score: Optional[float]) -> float:
         return round((roi or 0.0) * (liquidity_score or 0.0), 2)
 
+    def _profit_per_minute(self, profit: Optional[int], order_volume: int) -> Optional[float]:
+        if profit is None or order_volume <= 0 or self.settings.market_trending_window_hours <= 0:
+            return None
+        window_minutes = self.settings.market_trending_window_hours * 60.0
+        return round((profit * order_volume) / window_minutes, 2)
+
     def _normalize_roi_filter(self, value: Optional[float]) -> Optional[float]:
         if value is None:
             return None
-        return round(value * 100.0, 4) if value <= 1 else value
+        return round(value * 100.0, 4) if 0 < value < 1 else value
 
     def _coerce_sort_field(self, sort_by: str, default_sort: str) -> str:
-        valid_fields = {"name", "buy_price", "sell_price", "spread", "profit", "roi", "flip_score", "order_volume", "last_seen"}
+        valid_fields = {"name", "buy_price", "sell_price", "spread", "profit", "profit_per_minute", "roi", "flip_score", "order_volume", "last_seen"}
         return sort_by if sort_by in valid_fields else default_sort
 
     def _match_text(self, value: Optional[str], query: str) -> bool:
