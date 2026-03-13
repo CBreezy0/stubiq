@@ -18,7 +18,7 @@ import { formatSignedStubs, formatStubs, marketPhaseLabels } from '@/lib/utils';
 function DashboardContent() {
   const {
     phase,
-    flips,
+    topFlips,
     floors,
     rosterTargets,
     collections,
@@ -42,13 +42,13 @@ function DashboardContent() {
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard title="Market Phase" value={phaseLabel} hint={phase.data?.current.override_active ? 'Manual override active' : 'Auto-detected'} />
-        <MetricCard title="Top Flips" value={String(flips.data?.count ?? 0)} hint="Live ROI-ranked opportunities" />
+        <MetricCard title="Top Flips" value={String(topFlips.data?.count ?? 0)} hint="Live profit-per-minute leaders" />
         <MetricCard title="Inventory Value" value={formatStubs(inventory.data?.total_market_value ?? 0)} hint="Imported binder marked-to-market" />
         <MetricCard title="Inventory P/L" value={formatSignedStubs(inventory.data?.total_profit_loss ?? 0)} hint="Estimated gain/loss on imported cards" />
       </section>
 
       <section className="grid gap-6 2xl:grid-cols-2">
-        <FlipTable title="Top Flips" items={flips.data?.items ?? []} />
+        <FlipTable title="Top Flip Opportunities" items={topFlips.data?.items ?? []} />
         <MarketMoversTable
           title="Trending Cards"
           items={trending.data?.items ?? []}

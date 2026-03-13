@@ -2,11 +2,41 @@
 
 import useSWR from 'swr';
 
-import { api } from '@/lib/api';
+import { ACCESS_TOKEN_STORAGE_KEY, API_BASE_URL, api } from '@/lib/api';
+
+type FlipListingsResponse = Awaited<ReturnType<(typeof api)['getFlips']>>;
+
+async function getTopFlipsDashboard(): Promise<FlipListingsResponse> {
+  const headers = new Headers({ Accept: 'application/json' });
+  const accessToken = typeof window === 'undefined' ? null : window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/flips/top?limit=10&sort_by=profit_per_minute`, {
+    headers,
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    let message = `Request failed with status ${response.status}`;
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (payload.detail) message = payload.detail;
+    } catch {
+      const text = await response.text();
+      if (text) message = text;
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<FlipListingsResponse>;
+}
 
 export function useDashboard() {
   const phase = useSWR('market-phases', () => api.getMarketPhases(), { refreshInterval: 60_000 });
-  const flips = useSWR('market-flips-dashboard', () => api.getFlips({ limit: 5, sort_by: 'roi', sort_order: 'desc' }), {
+  const topFlips = useSWR('market-top-flips-dashboard', getTopFlipsDashboard, {
     refreshInterval: 30_000,
   });
   const floors = useSWR('market-floors', () => api.getFloors(8), { refreshInterval: 60_000 });
@@ -23,7 +53,7 @@ export function useDashboard() {
 
   return {
     phase,
-    flips,
+    topFlips,
     floors,
     rosterTargets,
     collections,
