@@ -23,6 +23,25 @@ def _signup(client: TestClient, email: str, password: str = "Password123!", disp
 
 
 
+def test_auth_signup_options_preflight(client):
+    response = client.options(
+        "/auth/signup",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-methods"]
+    assert response.headers["access-control-allow-origin"] in {"*", "http://localhost:3000"}
+
+
+def test_auth_signup_options_without_preflight_headers(client):
+    response = client.options("/auth/signup")
+    assert response.status_code == 200
+
+
 def test_signup(client):
     payload = _signup(client, "signup@example.com")
     assert payload["token_type"] == "bearer"

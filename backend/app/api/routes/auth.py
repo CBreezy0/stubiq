@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -22,6 +22,32 @@ from app.security.deps import auth_rate_limit, get_auth_service, require_active_
 from app.services.auth_service import AuthError, AuthRequestContext
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _preflight_headers(request: Request) -> dict[str, str]:
+    settings = request.app.state.settings
+    origin = request.headers.get("origin")
+    request_headers = request.headers.get("access-control-request-headers", "*")
+
+    allowed_origin = "*"
+    allowed_origins = tuple(getattr(settings, "cors_allow_origins", ()) or ())
+    if origin and ("*" in allowed_origins or origin in allowed_origins):
+        allowed_origin = origin
+    elif not origin and "*" not in allowed_origins and allowed_origins:
+        allowed_origin = allowed_origins[0]
+
+    return {
+        "Access-Control-Allow-Origin": allowed_origin,
+        "Access-Control-Allow-Methods": "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT",
+        "Access-Control-Allow-Headers": request_headers or "*",
+        "Access-Control-Max-Age": "600",
+        "Vary": "Origin",
+    }
+
+
+@router.options("/{auth_path:path}", include_in_schema=False)
+def auth_preflight(auth_path: str, request: Request):
+    return Response(status_code=status.HTTP_200_OK, headers=_preflight_headers(request))
 
 
 def _context(request: Request, *, device_name: str | None = None, platform: str | None = None) -> AuthRequestContext:
