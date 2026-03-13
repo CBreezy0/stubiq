@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 
 import { EmptyState } from '@/components/EmptyState';
@@ -16,12 +17,22 @@ type DashboardMarketMover = {
   liquidity_score?: number | null;
 };
 
+type MarketMoverSortField = 'change_percent' | 'price_change' | 'best_sell_price' | 'liquidity_score';
+type SortDirection = 'asc' | 'desc';
+
 interface MarketMoversTableProps {
   title: string;
   items: Array<MarketMover | DashboardMarketMover>;
   emptyTitle?: string;
   emptyDescription?: string;
   variant?: 'trend' | 'market';
+}
+
+function compareNullableNumber(a: number | null | undefined, b: number | null | undefined, direction: SortDirection) {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return direction === 'desc' ? b - a : a - b;
 }
 
 export function MarketMoversTable({
@@ -31,15 +42,46 @@ export function MarketMoversTable({
   emptyDescription = 'The current cache does not have enough price history to score movers.',
   variant = 'trend',
 }: MarketMoversTableProps) {
+  const [sortField, setSortField] = useState<MarketMoverSortField>('change_percent');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  const trendItems = items as MarketMover[];
+  const marketItems = items as DashboardMarketMover[];
+
+  const sortedMarketItems = useMemo(() => {
+    const nextItems = [...marketItems];
+    nextItems.sort((left, right) => {
+      const mapping = {
+        change_percent: [left.change_percent, right.change_percent],
+        price_change: [left.price_change, right.price_change],
+        best_sell_price: [left.best_sell_price, right.best_sell_price],
+        liquidity_score: [left.liquidity_score, right.liquidity_score],
+      } as const;
+      const [leftValue, rightValue] = mapping[sortField];
+      return compareNullableNumber(leftValue, rightValue, sortDirection);
+    });
+    return nextItems;
+  }, [marketItems, sortDirection, sortField]);
+
+  const handleSort = (field: MarketMoverSortField) => {
+    if (field === sortField) {
+      setSortDirection((current) => (current === 'desc' ? 'asc' : 'desc'));
+      return;
+    }
+    setSortField(field);
+    setSortDirection('desc');
+  };
+
+  const sortIndicator = (field: MarketMoverSortField) => {
+    if (field !== sortField) return '↕';
+    return sortDirection === 'desc' ? '↓' : '↑';
+  };
+
   if (items.length === 0) {
     return <EmptyState title={emptyTitle} description={emptyDescription} />;
   }
 
-  const trendItems = items as MarketMover[];
-
   if (variant === 'market') {
-    const marketItems = items as DashboardMarketMover[];
-
     return (
       <div className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/70 shadow-lg">
         <div className="border-b border-slate-800 px-5 py-4">
@@ -50,14 +92,30 @@ export function MarketMoversTable({
             <thead className="bg-slate-950/50 text-left text-slate-400">
               <tr>
                 <th className="px-5 py-3 font-medium">Card</th>
-                <th className="px-5 py-3 font-medium">Change</th>
-                <th className="px-5 py-3 font-medium">Change %</th>
-                <th className="px-5 py-3 font-medium">Sell</th>
-                <th className="px-5 py-3 font-medium">Liquidity</th>
+                <th className="px-5 py-3 font-medium">
+                  <button type="button" onClick={() => handleSort('price_change')} className="inline-flex items-center gap-1 text-left transition hover:text-white">
+                    Change <span className="text-xs">{sortIndicator('price_change')}</span>
+                  </button>
+                </th>
+                <th className="px-5 py-3 font-medium">
+                  <button type="button" onClick={() => handleSort('change_percent')} className="inline-flex items-center gap-1 text-left transition hover:text-white">
+                    Change % <span className="text-xs">{sortIndicator('change_percent')}</span>
+                  </button>
+                </th>
+                <th className="px-5 py-3 font-medium">
+                  <button type="button" onClick={() => handleSort('best_sell_price')} className="inline-flex items-center gap-1 text-left transition hover:text-white">
+                    Sell <span className="text-xs">{sortIndicator('best_sell_price')}</span>
+                  </button>
+                </th>
+                <th className="px-5 py-3 font-medium">
+                  <button type="button" onClick={() => handleSort('liquidity_score')} className="inline-flex items-center gap-1 text-left transition hover:text-white">
+                    Liquidity <span className="text-xs">{sortIndicator('liquidity_score')}</span>
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {marketItems.map((item) => (
+              {sortedMarketItems.map((item) => (
                 <tr key={item.item_id} className="border-t border-slate-800/80 text-slate-200">
                   <td className="px-5 py-4">
                     <Link href={`/cards/${item.item_id}`} className="font-medium text-white transition hover:text-sky-300">
